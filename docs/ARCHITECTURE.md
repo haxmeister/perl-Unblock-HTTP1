@@ -40,6 +40,12 @@ Received request metadata maps directly from method, exact request-target,
 HTTP/1 version, ordered header fields, and ordered trailer fields. Unblock does
 not infer Uniform scheme or authority from transport state or Host.
 
+When the request-target itself carries routing metadata, Unblock exposes those
+bytes through Uniform as well: absolute-form supplies its explicit scheme and
+authority, while CONNECT authority-form supplies authority. The raw Host field
+remains unchanged. In particular, an absolute-form target takes routing
+precedence over a mismatched Host without destroying the received header bytes.
+
 When sending an HTTP/1.1 request, an absent Host field can be synthesized from
 explicit Uniform authority metadata on the wire. This sender mapping does not
 mutate the Uniform object.
@@ -87,10 +93,13 @@ No response body is consumed for HEAD, informational responses, 204, 205, 304,
 101, or successful CONNECT. Other final responses use Transfer-Encoding, then Content-Length, then
 connection close.
 
-When a response Transfer-Encoding ends in C<chunked>, Unblock removes that
-outer chunk framing. Earlier transfer codings remain encoded in the body bytes.
-When the final transfer coding is not chunked, EOF delimits the message.
-Unblock does not automatically decode transfer codings such as gzip.
+When a response Transfer-Encoding ends in C<chunked>, Unblock owns that final
+chunk framing. Earlier transfer codings remain encoded in the body bytes. When
+the final transfer coding is not chunked, EOF delimits the message and the
+connection is not reusable. The same rule applies when serializing responses:
+caller-supplied body bytes are assumed to have any earlier transfer codings
+already applied, and Unblock adds only a final chunked layer when required.
+Unblock does not automatically encode or decode transfer codings such as gzip.
 
 Transfer-Encoding plus Content-Length is rejected as ambiguous. input_eof()
 completes only a close-delimited body.
