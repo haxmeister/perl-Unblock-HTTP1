@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feature/native-borrowed-input
     paths:
       - 'bench/compare-linux-event.pl'
       - 'lib/Unblock/HTTP1.pm'
