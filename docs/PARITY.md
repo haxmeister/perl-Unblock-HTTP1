@@ -17,7 +17,10 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Exact request-target bytes.
 - Origin-form, absolute-form, CONNECT authority-form, and OPTIONS asterisk-form
   request-target validation.
-- HTTP/1.1 absolute-form Host generation and authority matching.
+- HTTP/1.1 absolute-form Host generation for senders and request-target
+  authority precedence for receivers without rewriting raw Host bytes.
+- Explicit Uniform scheme/authority metadata from absolute-form and CONNECT
+  request targets.
 - Ordered duplicate header fields.
 - Configurable head and header-count limits.
 - Content-Length request and response framing.
@@ -28,9 +31,9 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Strict request chunked-coding rules.
 - HTTP/1.0 Transfer-Encoding rejection.
 - Response framing with preceding transfer codings and non-chunked final
-  transfer codings.
-- Final chunked framing is removed while earlier transfer-coded body bytes
-  remain opaque to the engine.
+  transfer codings on both receive and send paths.
+- Final chunked framing is removed on receive and added on send while earlier
+  transfer-coded body bytes remain opaque to the engine.
 - Obsolete folded request fields rejected.
 - HTTP/1.1 Host requirements and persistence rules.
 - HTTP/1.0 keep-alive rules.
