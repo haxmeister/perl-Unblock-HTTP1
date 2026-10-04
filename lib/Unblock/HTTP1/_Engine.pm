@@ -72,8 +72,17 @@ sub _input_borrowed {
         if $self->{driving};
     return (4, 0, 0) if $self->{switched};
     return (3, 0, 0) if $self->{closed};
-    croak '_input_borrowed(): cannot mix borrowed input with buffered portable input'
-        if length $self->{input};
+    if (length $self->{input}) {
+        croak '_input_borrowed(): buffered fallback requires a native input window'
+            unless ref($window)
+                && $window->isa('Unblock::HTTP1::_Native::BorrowedWindow');
+        $self->{input} .= $window->slice(0, $length);
+        local $self->{driving} = 1;
+        $self->_drive;
+
+        my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
+        return ($status, $length, $self->_borrowed_native_head_ready);
+    }
 
     my ($status, $consumed);
     {
