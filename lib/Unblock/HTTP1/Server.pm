@@ -35,7 +35,7 @@ sub new {
 sub transaction { $_[0]{active} }
 
 sub _input_native_head {
-    my ($self, $head) = @_;
+    my ($self, $head, $request) = @_;
     croak '_input_native_head(): cannot be called recursively from an engine callback'
         if $self->{driving};
     return (4, 0) if $self->{switched};
@@ -46,6 +46,7 @@ sub _input_native_head {
         if $self->{active} || $self->{rx};
 
     local $self->{borrowed_head} = $head;
+    local $self->{borrowed_request} = $request;
     local $self->{native_head_preconsumed} = 1;
     local $self->{driving} = 1;
     $self->_drive;
@@ -63,6 +64,7 @@ sub _drive {
         if (!$tx) {
             return unless $self->{borrowed_head} || $self->_input_length;
             my $head = delete $self->{borrowed_head};
+            my $request = delete $self->{borrowed_request};
             if (!$head) {
                 my ($input, $offset) = $self->_input_window;
                 $head = Unblock::HTTP1::_Native->parse_request_head(
@@ -91,12 +93,14 @@ sub _drive {
                 return;
             }
 
-            my %target_metadata = Unblock::HTTP1::_Wire::_received_request_metadata(
-                $head->{method}, $head->{target},
-            );
-            my $request = Unblock::HTTP1::_Wire::_request_from_validated_head(
-                $head, %target_metadata,
-            );
+            if (!$request) {
+                my %target_metadata = Unblock::HTTP1::_Wire::_received_request_metadata(
+                    $head->{method}, $head->{target},
+                );
+                $request = Unblock::HTTP1::_Wire::_request_from_validated_head(
+                    $head, %target_metadata,
+                );
+            }
 
             $tx = Unblock::HTTP1::Transaction->_new(
                 $self, $request,
