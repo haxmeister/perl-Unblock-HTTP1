@@ -45,13 +45,12 @@ The host can call close($reason) when one expires.
 TLS is outside the engine. Feed decrypted application bytes into Unblock and
 send Unblock output through the TLS transport.
 
-## Linux::Event
+## Native adapter optimization
 
-A basic Linux::Event adapter uses the same byte methods as any other host.
-That public-byte adapter is the correctness reference.
+The public byte API is the correctness reference for every integration.
 
-A later optimized adapter may bridge Linux::Event's native Stream consumer ABI
-only when end-to-end measurements justify it. The bridge must remain an
-optimization rather than a second HTTP/1 implementation.
-
-See LINUX_EVENT_BRIDGE.md for the detailed integration contract.
+A transport-specific adapter may later optimize byte movement with a native
+consumer interface when end-to-end measurements justify it. Such a bridge must
+remain an optimization rather than a second HTTP/1 implementation, and it must
+preserve the same framing, lifecycle, error, and protocol-switch behavior as
+the portable API.
