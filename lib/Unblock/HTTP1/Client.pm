@@ -124,17 +124,30 @@ sub _drive {
             $response->mark_incomplete->freeze_initial;
             $tx->_set_response($response);
 
-            $self->{rx} = $rx = {
-                response   => $response,
-                mode       => $plan->{mode},
-                remaining  => $plan->{remaining},
-                keep_alive     => $plan->{keep_alive},
-                switch         => $plan->{switch},
-                forbid_content => $plan->{forbid_content} ? 1 : 0,
-            };
+            my $fixed_ready = !$plan->{switch}
+                && $plan->{mode} eq 'content-length'
+                && defined($plan->{remaining})
+                && length($self->{input}) >= $plan->{remaining};
+            my $immediate = !$plan->{switch}
+                && ($plan->{mode} eq 'none' || $fixed_ready);
+
+            if (!$immediate) {
+                $self->{rx} = $rx = {
+                    response       => $response,
+                    mode           => $plan->{mode},
+                    remaining      => $plan->{remaining},
+                    keep_alive     => $plan->{keep_alive},
+                    switch         => $plan->{switch},
+                    forbid_content => $plan->{forbid_content} ? 1 : 0,
+                };
+                if ($rx->{mode} eq 'chunked') {
+                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
+                }
+            }
 
             my $cb = $tx->_invoke('on_response', $response);
             return $self->_connection_error($cb) unless $cb eq '1';
+            return if $self->{closed};
 
             if ($plan->{switch}) {
                 return $self->_connection_error(
@@ -152,13 +165,29 @@ sub _drive {
                 return;
             }
 
-            if ($rx->{mode} eq 'none' ||
-                ($rx->{mode} eq 'content-length' && !$rx->{remaining})) {
-                $self->_finish_response;
+            if ($plan->{mode} eq 'none') {
+                $self->_complete_response(
+                    $tx, $response, $plan->{keep_alive},
+                );
                 next;
             }
-            if ($rx->{mode} eq 'chunked') {
-                $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
+
+            if ($fixed_ready) {
+                my $length = $plan->{remaining};
+                if ($length) {
+                    my $bytes = substr($self->{input}, 0, $length, '');
+                    return $self->_connection_error(
+                        '205 response must not contain content'
+                    ) if $plan->{forbid_content} && length $bytes;
+                    my $body_cb = $tx->_invoke('on_body', $response, $bytes);
+                    return $self->_connection_error($body_cb)
+                        unless $body_cb eq '1';
+                    return if $self->{closed};
+                }
+                $self->_complete_response(
+                    $tx, $response, $plan->{keep_alive},
+                );
+                next;
             }
         }
 
@@ -244,9 +273,16 @@ sub _finish_response {
     my ($self) = @_;
     my $tx = $self->{active} or return;
     my $rx = delete $self->{rx} or return;
-    $rx->{response}->mark_complete->freeze;
+    return $self->_complete_response(
+        $tx, $rx->{response}, $rx->{keep_alive},
+    );
+}
+
+sub _complete_response {
+    my ($self, $tx, $response, $keep_alive) = @_;
+    $response->mark_complete->freeze;
     $tx->_mark_remote_done;
-    $tx->{keep_alive} = $rx->{keep_alive} ? 1 : 0;
+    $tx->{keep_alive} = $keep_alive ? 1 : 0;
 
     # A final response can arrive before an incremental request body has
     # finished. The peer has already ended this HTTP exchange, so no further
