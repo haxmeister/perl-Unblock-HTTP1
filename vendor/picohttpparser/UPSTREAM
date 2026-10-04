@@ -19,8 +19,9 @@ network resource.
 Local modifications:
 
 - Unblock::HTTP1 adds a per-decoder chunk-extension byte budget to
-  phr_chunked_decoder. The decode loop counts extension bytes across fragmented
-  input and rejects a chunk header when the configured nonzero limit is
-  exceeded. A zero limit preserves unlimited upstream behavior.
+  phr_chunked_decoder. The decode loop counts total extension bytes across the
+  complete chunked message, including fragmented input, and rejects framing
+  when the configured nonzero limit is exceeded. A zero limit preserves
+  unlimited upstream behavior.
 
 No parsing or wire semantics outside that resource limit are changed locally.
