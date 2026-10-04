@@ -34,7 +34,7 @@ connection close as its message-body delimiter.
 
 ## Messages
 
-Requests and responses are Uniform::HTTP 0.04 objects.
+Requests and responses are Uniform::HTTP 0.05 objects.
 
 Received request metadata maps directly from method, exact request-target,
 HTTP/1 version, ordered header fields, and ordered trailer fields. Unblock does
