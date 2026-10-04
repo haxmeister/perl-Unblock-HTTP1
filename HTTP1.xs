@@ -90,7 +90,7 @@ valid_host_value(const char *value, size_t len)
         if (close_bracket == (size_t)-1 || close_bracket == 1) return 0;
         if (close_bracket + 1 == len) return 1;
         if (value[close_bracket + 1] != ':') return 0;
-        if (close_bracket + 2 == len) return 0;
+        if (close_bracket + 2 == len) return 1;
         for (i = close_bracket + 2; i < len; ++i)
             if (value[i] < '0' || value[i] > '9') return 0;
         return 1;
@@ -99,7 +99,7 @@ valid_host_value(const char *value, size_t len)
         if (value[i] == ':') {
             size_t j;
             ++colon_count;
-            if (colon_count > 1 || i + 1 == len) return 0;
+            if (colon_count > 1) return 0;
             for (j = i + 1; j < len; ++j)
                 if (value[j] < '0' || value[j] > '9') return 0;
             break;
@@ -181,10 +181,14 @@ connect_host_matches_target(const char *host, size_t host_len,
                             const char *target, size_t target_len)
 {
     size_t target_host_len = 0;
+    size_t compare_host_len = host_len;
     size_t i;
 
     if (ascii_equal_ci(host, host_len, target, target_len))
         return 1;
+
+    if (host_len && host[host_len - 1] == ':')
+        --compare_host_len;
 
     if (target_len == 0)
         return 0;
@@ -206,7 +210,7 @@ connect_host_matches_target(const char *host, size_t host_len,
     }
 
     return target_host_len != 0
-        && ascii_equal_ci(host, host_len, target, target_host_len);
+        && ascii_equal_ci(host, compare_host_len, target, target_host_len);
 }
 
 static int
@@ -251,7 +255,7 @@ valid_request_target(const char *method, size_t method_len,
                         return 0;
                     ++pos;
                 }
-                if (pos == authority_start)
+                if (pos == authority_start || target[authority_start] == ':')
                     return 0;
             }
             return 1;
