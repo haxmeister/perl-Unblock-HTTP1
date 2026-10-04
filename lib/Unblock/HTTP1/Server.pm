@@ -207,10 +207,6 @@ sub _transaction_respond {
         $tx->request, $response,
         stream_body => $stream_body,
     );
-    if ($plan->{switch} && ($tx->{request_body_mode} || 'none') ne 'none') {
-        croak 'respond(): protocol switch requires a request without HTTP message body framing';
-    }
-
     $tx->_set_response($response);
     $tx->{send_plan} = $plan;
     $tx->{stream_body} = $stream_body;
