@@ -431,6 +431,217 @@ strict_headers(const struct phr_header *headers, size_t count)
 }
 
 
+static SV *
+ub_http1_parse_request_head_result(
+    pTHX_
+    const char *buf,
+    size_t buffer_len,
+    size_t last_len,
+    size_t max_headers
+)
+{
+    const char *method;
+    size_t method_len;
+    const char *target;
+    size_t target_len;
+    int minor;
+    struct phr_header headers[UB_HTTP1_MAX_HEADERS];
+    size_t count;
+    int consumed;
+    size_t i;
+    int host_count = 0;
+    int has_cl = 0;
+    UV content_length = 0;
+    int te_present = 0;
+    int te_count = 0;
+    int chunked_count = 0;
+    int final_chunked = 0;
+    int unsupported = 0;
+    int close_seen = 0;
+    int keep_seen = 0;
+    int expect_mode = 0;
+    int body_mode = UB_BODY_NONE;
+    int is_connect = 0;
+    const char *host_value = NULL;
+    size_t host_value_len = 0;
+    HV *hv;
+    AV *list;
+
+    if (last_len > buffer_len)
+        croak("last_len exceeds input window length");
+    if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
+        croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
+
+    count = max_headers;
+    consumed = phr_parse_request(
+        buf, buffer_len,
+        &method, &method_len, &target, &target_len, &minor,
+        headers, &count, last_len
+    );
+
+    if (consumed == -2)
+        return NULL;
+
+    if (consumed == -1) {
+        if (count == max_headers)
+            return new_error_result(
+                aTHX_ 431, "too many HTTP/1 request header fields"
+            );
+        return new_error_result(aTHX_ 400, "malformed HTTP/1 request");
+    }
+
+    if (minor < 0 || minor > 9)
+        return new_error_result(aTHX_ 505, "unsupported HTTP/1 version");
+
+    if (!strict_headers(headers, count))
+        return new_error_result(
+            aTHX_ 400, "invalid or folded HTTP/1 header field"
+        );
+
+    {
+        const char *error = NULL;
+        int error_status = 0;
+
+        is_connect = ascii_equal_cs(method, method_len, "CONNECT", 7);
+        if (!valid_request_target(method, method_len, target, target_len)) {
+            error = "invalid HTTP/1 request target";
+            error_status = 400;
+        }
+        if (!error && is_connect && minor == 0) {
+            error = "CONNECT requires HTTP/1.1 semantics";
+            error_status = 400;
+        }
+
+        for (i = 0; i < count && !error; ++i) {
+            const char *name = headers[i].name;
+            size_t name_len = headers[i].name_len;
+            const char *value = headers[i].value;
+            size_t value_len = headers[i].value_len;
+
+            if (ascii_equal_ci(name, name_len, "Host", 4)) {
+                ++host_count;
+                if (host_count == 1) {
+                    host_value = value;
+                    host_value_len = value_len;
+                }
+                if (!valid_host_value(value, value_len)) {
+                    error = "invalid Host field";
+                    error_status = 400;
+                }
+            } else if (ascii_equal_ci(
+                    name, name_len, "Content-Length", 14)) {
+                if (!parse_content_length(
+                        value, value_len,
+                        &content_length, &has_cl)) {
+                    error = "invalid or conflicting Content-Length";
+                    error_status = 400;
+                }
+            } else if (ascii_equal_ci(
+                    name, name_len, "Transfer-Encoding", 17)) {
+                te_present = 1;
+                if (!parse_transfer_encoding(
+                        value, value_len,
+                        &te_count, &chunked_count,
+                        &final_chunked, &unsupported)) {
+                    error = "invalid Transfer-Encoding";
+                    error_status = 400;
+                }
+            } else if (ascii_equal_ci(
+                    name, name_len, "Connection", 10)) {
+                if (!parse_connection(
+                        value, value_len, &close_seen, &keep_seen)) {
+                    error = "invalid Connection field";
+                    error_status = 400;
+                }
+            } else if (ascii_equal_ci(name, name_len, "Expect", 6)) {
+                int e = parse_expect(value, value_len);
+                if (minor == 0) {
+                    expect_mode = 0;
+                } else if (e < 0) {
+                    expect_mode = -1;
+                } else if (expect_mode >= 0) {
+                    expect_mode = 1;
+                }
+            }
+        }
+
+        if (!error && host_count > 1) {
+            error = "multiple Host fields";
+            error_status = 400;
+        }
+        if (!error && minor >= 1 && host_count != 1) {
+            error = "HTTP/1.1 semantics require exactly one Host field";
+            error_status = 400;
+        }
+        if (!error && te_present && has_cl) {
+            error = "Transfer-Encoding and Content-Length cannot be combined";
+            error_status = 400;
+        }
+        if (!error && minor == 0 && te_present) {
+            error = "HTTP/1.0 request must not contain Transfer-Encoding";
+            error_status = 400;
+        }
+        if (!error && is_connect
+            && (te_present || (has_cl && content_length != 0))) {
+            error = "CONNECT request must not contain content framing";
+            error_status = 400;
+        }
+        if (!error && is_connect && host_count == 1
+            && !connect_host_matches_target(
+                host_value, host_value_len, target, target_len)) {
+            error = "CONNECT Host must identify request target";
+            error_status = 400;
+        }
+
+        if (!error && te_present) {
+            if (chunked_count != 1 || !final_chunked) {
+                error =
+                    "chunked must be the final and only chunked transfer coding";
+                error_status = 400;
+            } else if (unsupported) {
+                error = "unsupported transfer coding";
+                error_status = 501;
+            } else {
+                body_mode = UB_BODY_CHUNKED;
+            }
+        } else if (!error && has_cl) {
+            body_mode = (is_connect && content_length == 0)
+                ? UB_BODY_NONE : UB_BODY_CONTENT_LENGTH;
+        }
+
+        if (error)
+            return new_error_result(aTHX_ error_status, error);
+    }
+
+    hv = newHV();
+    hv_store(hv, "ok", 2, newSViv(1), 0);
+    hv_store(hv, "consumed", 8, newSViv(consumed), 0);
+    hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
+    hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
+    hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
+    list = headers_to_av(aTHX_ headers, count);
+    hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+
+    if (body_mode == UB_BODY_CHUNKED)
+        hv_store(hv, "body_mode", 9, newSVpvs("chunked"), 0);
+    else if (body_mode == UB_BODY_CONTENT_LENGTH)
+        hv_store(hv, "body_mode", 9, newSVpvs("content-length"), 0);
+    else
+        hv_store(hv, "body_mode", 9, newSVpvs("none"), 0);
+
+    if (has_cl)
+        hv_store(hv, "content_length", 14, newSVuv(content_length), 0);
+
+    hv_store(
+        hv, "keep_alive", 10,
+        newSViv(close_seen ? 0 : (minor >= 1 ? 1 : (keep_seen ? 1 : 0))),
+        0
+    );
+    hv_store(hv, "expect_continue", 15, newSViv(expect_mode), 0);
+
+    return newRV_noinc((SV *)hv);
+}
+
 #define UB_HTTP1_INPUT_ABI_VERSION 1U
 #define UB_HTTP1_INPUT_OK 0
 #define UB_HTTP1_INPUT_MORE 1
@@ -800,32 +1011,6 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
-    const char *method;
-    size_t method_len;
-    const char *target;
-    size_t target_len;
-    int minor;
-    struct phr_header headers[UB_HTTP1_MAX_HEADERS];
-    size_t count;
-    int consumed;
-    size_t i;
-    int host_count = 0;
-    int has_cl = 0;
-    UV content_length = 0;
-    int te_present = 0;
-    int te_count = 0;
-    int chunked_count = 0;
-    int final_chunked = 0;
-    int unsupported = 0;
-    int close_seen = 0;
-    int keep_seen = 0;
-    int expect_mode = 0;
-    int body_mode = UB_BODY_NONE;
-    int is_connect = 0;
-    const char *host_value = NULL;
-    size_t host_value_len = 0;
-    HV *hv;
-    AV *list;
   CODE:
     (void)CLASS;
     buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
@@ -833,135 +1018,15 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
         croak("offset exceeds buffer length");
     buf += (size_t)offset;
     buffer_len -= (STRLEN)offset;
-    if (last_len > (UV)buffer_len)
-        croak("last_len exceeds input window length");
-    if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
-        croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
-    count = (size_t)max_headers;
-    consumed = phr_parse_request(buf, (size_t)buffer_len,
-        &method, &method_len, &target, &target_len, &minor,
-        headers, &count, (size_t)last_len);
-    if (consumed == -2) XSRETURN_UNDEF;
-    if (consumed == -1) {
-        if (count == (size_t)max_headers)
-            RETVAL = new_error_result(aTHX_ 431, "too many HTTP/1 request header fields");
-        else
-            RETVAL = new_error_result(aTHX_ 400, "malformed HTTP/1 request");
-    } else if (minor < 0 || minor > 9) {
-        RETVAL = new_error_result(aTHX_ 505, "unsupported HTTP/1 version");
-    } else if (!strict_headers(headers, count)) {
-        RETVAL = new_error_result(aTHX_ 400, "invalid or folded HTTP/1 header field");
-    } else {
-        const char *error = NULL;
-        int error_status = 0;
-        is_connect = ascii_equal_cs(method, method_len, "CONNECT", 7);
-        if (!valid_request_target(method, method_len, target, target_len)) {
-            error = "invalid HTTP/1 request target";
-            error_status = 400;
-        }
-        if (!error && is_connect && minor == 0) {
-            error = "CONNECT requires HTTP/1.1 semantics";
-            error_status = 400;
-        }
-        for (i = 0; i < count && !error; ++i) {
-            const char *name = headers[i].name;
-            size_t name_len = headers[i].name_len;
-            const char *value = headers[i].value;
-            size_t value_len = headers[i].value_len;
-            if (ascii_equal_ci(name, name_len, "Host", 4)) {
-                ++host_count;
-                if (host_count == 1) {
-                    host_value = value;
-                    host_value_len = value_len;
-                }
-                if (!valid_host_value(value, value_len)) {
-                    error = "invalid Host field"; error_status = 400;
-                }
-            } else if (ascii_equal_ci(name, name_len, "Content-Length", 14)) {
-                if (!parse_content_length(value, value_len, &content_length, &has_cl)) {
-                    error = "invalid or conflicting Content-Length"; error_status = 400;
-                }
-            } else if (ascii_equal_ci(name, name_len, "Transfer-Encoding", 17)) {
-                te_present = 1;
-                if (!parse_transfer_encoding(value, value_len, &te_count,
-                        &chunked_count, &final_chunked, &unsupported)) {
-                    error = "invalid Transfer-Encoding"; error_status = 400;
-                }
-            } else if (ascii_equal_ci(name, name_len, "Connection", 10)) {
-                if (!parse_connection(value, value_len, &close_seen, &keep_seen)) {
-                    error = "invalid Connection field"; error_status = 400;
-                }
-            } else if (ascii_equal_ci(name, name_len, "Expect", 6)) {
-                int e = parse_expect(value, value_len);
-                if (minor == 0) {
-                    /* HTTP/1.0 did not define expectations. In particular,
-                     * a received 100-continue expectation must be ignored. */
-                    expect_mode = 0;
-                } else if (e < 0) {
-                    expect_mode = -1;
-                } else if (expect_mode >= 0) {
-                    expect_mode = 1;
-                }
-            }
-        }
-        if (!error && host_count > 1) {
-            error = "multiple Host fields"; error_status = 400;
-        }
-        if (!error && minor >= 1 && host_count != 1) {
-            error = "HTTP/1.1 semantics require exactly one Host field"; error_status = 400;
-        }
-        if (!error && te_present && has_cl) {
-            error = "Transfer-Encoding and Content-Length cannot be combined"; error_status = 400;
-        }
-        if (!error && minor == 0 && te_present) {
-            error = "HTTP/1.0 request must not contain Transfer-Encoding"; error_status = 400;
-        }
-        if (!error && is_connect && (te_present || (has_cl && content_length != 0))) {
-            error = "CONNECT request must not contain content framing"; error_status = 400;
-        }
-        if (!error && is_connect && host_count == 1 &&
-            !connect_host_matches_target(
-                host_value, host_value_len, target, target_len
-            )) {
-            error = "CONNECT Host must identify request target"; error_status = 400;
-        }
-        if (!error && te_present) {
-            if (chunked_count != 1 || !final_chunked) {
-                error = "chunked must be the final and only chunked transfer coding"; error_status = 400;
-            } else if (unsupported) {
-                error = "unsupported transfer coding"; error_status = 501;
-            } else {
-                body_mode = UB_BODY_CHUNKED;
-            }
-        } else if (!error && has_cl) {
-            body_mode = (is_connect && content_length == 0)
-                ? UB_BODY_NONE : UB_BODY_CONTENT_LENGTH;
-        }
-        if (error) {
-            RETVAL = new_error_result(aTHX_ error_status, error);
-        } else {
-            hv = newHV();
-            hv_store(hv, "ok", 2, newSViv(1), 0);
-            hv_store(hv, "consumed", 8, newSViv(consumed), 0);
-            hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
-            hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
-            hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
-            list = headers_to_av(aTHX_ headers, count);
-            hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
-            if (body_mode == UB_BODY_CHUNKED)
-                hv_store(hv, "body_mode", 9, newSVpvs("chunked"), 0);
-            else if (body_mode == UB_BODY_CONTENT_LENGTH)
-                hv_store(hv, "body_mode", 9, newSVpvs("content-length"), 0);
-            else
-                hv_store(hv, "body_mode", 9, newSVpvs("none"), 0);
-            if (has_cl)
-                hv_store(hv, "content_length", 14, newSVuv(content_length), 0);
-            hv_store(hv, "keep_alive", 10,
-                newSViv(close_seen ? 0 : (minor >= 1 ? 1 : (keep_seen ? 1 : 0))), 0);
-            hv_store(hv, "expect_continue", 15, newSViv(expect_mode), 0);
-            RETVAL = newRV_noinc((SV *)hv);
-        }
-    }
+    RETVAL = ub_http1_parse_request_head_result(
+        aTHX_
+        buf,
+        (size_t)buffer_len,
+        (size_t)last_len,
+        (size_t)max_headers
+    );
+    if (RETVAL == NULL)
+        XSRETURN_UNDEF;
   OUTPUT:
     RETVAL
 
