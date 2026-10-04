@@ -1597,9 +1597,9 @@ sub response_plan {
         close_after    => $close_after,
         switch         => $switch,
         body_finalized => $stream_body ? 0 : 1,
-        forbid_content => $metadata_only_framing ? 1 : 0,
     };
 }
+
 sub chunk {
     my ($bytes) = @_;
     $bytes = _bytes('body chunk', $bytes);
