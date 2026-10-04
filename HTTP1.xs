@@ -659,6 +659,10 @@ typedef struct {
     SV *engine;
     CV *input_cv;
     CV *eof_cv;
+    int role;
+    int direct_head;
+    size_t max_headers;
+    size_t max_head_size;
 } ub_http1_input_context;
 
 typedef struct {
@@ -780,7 +784,9 @@ ub_http1_call_engine_input(
     ub_http1_input_context *context,
     SV *window,
     size_t length,
-    size_t *consumed
+    SV *head,
+    size_t *consumed,
+    int *head_ready
 )
 {
     CV *cv = ub_http1_engine_method_cv(
@@ -789,6 +795,7 @@ ub_http1_call_engine_input(
     int result = 0;
     int count;
     SV *error = NULL;
+    SV *ready_sv;
     SV *consumed_sv;
     SV *status_sv;
     UV consumed_uv;
@@ -801,20 +808,23 @@ ub_http1_call_engine_input(
     XPUSHs(context->engine);
     XPUSHs(window);
     mPUSHu((UV)length);
+    XPUSHs(head != NULL ? head : &PL_sv_undef);
     PUTBACK;
     count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
     SPAGAIN;
     if (SvTRUE(ERRSV)) {
         error = newSVsv(ERRSV);
     } else {
-        if (count != 2)
+        if (count != 3)
             croak("Unblock::HTTP1 native input returned the wrong number of values");
+        ready_sv = POPs;
         consumed_sv = POPs;
         status_sv = POPs;
         consumed_uv = SvUV(consumed_sv);
         if (consumed_uv > (UV)length)
             croak("Unblock::HTTP1 native input consumed beyond its window");
         *consumed = (size_t)consumed_uv;
+        *head_ready = SvTRUE(ready_sv) ? 1 : 0;
         result = SvIV(status_sv);
     }
     PUTBACK;
@@ -843,6 +853,25 @@ ub_http1_input_create(pTHX_ SV *engine)
         return NULL;
 
     context->engine = SvREFCNT_inc(engine);
+    context->role = sv_derived_from(engine, "Unblock::HTTP1::Server") ? 1
+        : sv_derived_from(engine, "Unblock::HTTP1::Client") ? 2 : 0;
+    context->direct_head = context->role == 1 ? 1 : 0;
+    context->max_headers = 100;
+    context->max_head_size = 65536;
+
+    if (SvTYPE(SvRV(engine)) == SVt_PVHV) {
+        HV *engine_hv = (HV *)SvRV(engine);
+        SV **value;
+
+        value = hv_fetch(engine_hv, "max_headers", 11, 0);
+        if (value != NULL && SvOK(*value))
+            context->max_headers = (size_t)SvUV(*value);
+
+        value = hv_fetch(engine_hv, "max_head_size", 13, 0);
+        if (value != NULL && SvOK(*value))
+            context->max_head_size = (size_t)SvUV(*value);
+    }
+
     return context;
 }
 
@@ -859,17 +888,43 @@ ub_http1_input_borrowed(
     ub_http1_borrowed_window *window;
     SV *inner;
     SV *object;
+    SV *head = NULL;
+    int head_ready = 0;
     int result;
 
     if (context == NULL || consumed == NULL)
         croak("invalid Unblock::HTTP1 native input context");
 
     *consumed = 0;
-    Newxz(window, 1, ub_http1_borrowed_window);
-    if (window == NULL)
-        croak("unable to allocate borrowed input window");
+    if (data == NULL)
+        data = "";
 
-    window->data = data != NULL ? data : "";
+    if (context->role == 1 && context->direct_head) {
+        head = ub_http1_parse_request_head_result(
+            aTHX_
+            data,
+            length,
+            0,
+            context->max_headers
+        );
+
+        if (head == NULL) {
+            if (length <= context->max_head_size)
+                return UB_HTTP1_INPUT_MORE;
+            head = new_error_result(
+                aTHX_ 431, "request head exceeds configured limit"
+            );
+        }
+    }
+
+    Newxz(window, 1, ub_http1_borrowed_window);
+    if (window == NULL) {
+        if (head != NULL)
+            SvREFCNT_dec(head);
+        croak("unable to allocate borrowed input window");
+    }
+
+    window->data = data;
     window->length = length;
     window->offset = 0;
     window->valid = 1;
@@ -886,23 +941,36 @@ ub_http1_input_borrowed(
         JMPENV_PUSH(jump_status);
         if (jump_status == 0) {
             result = ub_http1_call_engine_input(
-                aTHX_ context, object, length, consumed
+                aTHX_
+                context,
+                object,
+                length,
+                head,
+                consumed,
+                &head_ready
             );
             JMPENV_POP;
         } else {
             JMPENV_POP;
             window->valid = 0;
             SvREFCNT_dec(object);
+            if (head != NULL)
+                SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
         }
     }
 
     window->valid = 0;
     SvREFCNT_dec(object);
+    if (head != NULL)
+        SvREFCNT_dec(head);
 
     if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
         || result == 2)
         croak("Unblock::HTTP1 engine returned invalid native input status");
+
+    if (context->role == 1)
+        context->direct_head = head_ready;
 
     return result;
 }
