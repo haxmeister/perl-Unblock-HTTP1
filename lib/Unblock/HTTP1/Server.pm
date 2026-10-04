@@ -34,6 +34,26 @@ sub new {
 
 sub transaction { $_[0]{active} }
 
+sub _input_native_head {
+    my ($self, $head) = @_;
+    croak '_input_native_head(): cannot be called recursively from an engine callback'
+        if $self->{driving};
+    return (4, 0) if $self->{switched};
+    return (3, 0) if $self->{closed};
+    croak '_input_native_head(): cannot mix native head input with buffered portable input'
+        if length $self->{input};
+    croak '_input_native_head(): request body is already active'
+        if $self->{active} || $self->{rx};
+
+    local $self->{borrowed_head} = $head;
+    local $self->{native_head_preconsumed} = 1;
+    local $self->{driving} = 1;
+    $self->_drive;
+
+    my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
+    return ($status, $self->_borrowed_native_head_ready);
+}
+
 sub _drive {
     my ($self) = @_;
     while (!$self->{closed} && !$self->{switched}) {
@@ -41,7 +61,7 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$tx) {
-            return unless $self->_input_length;
+            return unless $self->{borrowed_head} || $self->_input_length;
             my $head = delete $self->{borrowed_head};
             if (!$head) {
                 my ($input, $offset) = $self->_input_window;
@@ -63,7 +83,8 @@ sub _drive {
                 $self->_protocol_error(431, 'request head exceeds configured limit');
                 return;
             }
-            $self->_input_discard($head->{consumed});
+            $self->_input_discard($head->{consumed})
+                unless $self->{native_head_preconsumed};
 
             if ($head->{expect_continue} < 0) {
                 $self->_protocol_error(417, 'unsupported Expect field');
