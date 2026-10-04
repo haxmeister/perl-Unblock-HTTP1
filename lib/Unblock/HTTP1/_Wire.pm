@@ -354,7 +354,8 @@ sub _validate_request_target {
 }
 
 sub _absolute_form_host {
-    my ($target) = @_;
+    my ($method, $target) = @_;
+    return (0, undef) if $method eq 'CONNECT';
     return (0, undef)
         unless $target =~ /\A([A-Za-z][A-Za-z0-9+.-]*):(.*)\z/s;
 
@@ -537,7 +538,7 @@ sub _simple_request_plan {
 
     my $target = _bytes('request target', $request->target);
     _validate_request_target($method, $target);
-    my ($absolute_form) = _absolute_form_host($target);
+    my ($absolute_form) = _absolute_form_host($method, $target);
     return if $absolute_form;
     my $count = $request->header_count;
     return unless defined $count;
@@ -699,7 +700,7 @@ sub request_plan {
     my $host = _values($fields, 'Host');
     croak 'HTTP/1 request must not contain multiple Host fields' if @$host > 1;
 
-    my ($absolute_form, $absolute_host) = _absolute_form_host($target);
+    my ($absolute_form, $absolute_host) = _absolute_form_host($method, $target);
     if ($version eq '1.1' && $absolute_form) {
         if (@$host) {
             croak 'HTTP/1.1 absolute-form Host must match request-target authority'
