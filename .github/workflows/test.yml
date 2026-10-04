@@ -80,3 +80,10 @@ jobs:
           podchecker lib/Unblock/HTTP1/Client.pm
           podchecker lib/Unblock/HTTP1/Server.pm
           podchecker lib/Unblock/HTTP1/Transaction.pm
+
+      - name: Test distribution tarball
+        if: matrix.os == 'ubuntu-latest' && matrix.perl == 'latest'
+        shell: bash
+        run: |
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" disttest
