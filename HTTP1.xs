@@ -561,7 +561,7 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
         if (!error && minor == 0 && te_present) {
             error = "HTTP/1.0 request must not contain Transfer-Encoding"; error_status = 400;
         }
-        if (!error && is_connect && (te_present || has_cl)) {
+        if (!error && is_connect && (te_present || (has_cl && content_length != 0))) {
             error = "CONNECT request must not contain content framing"; error_status = 400;
         }
         if (!error && is_connect && host_count == 1 &&
