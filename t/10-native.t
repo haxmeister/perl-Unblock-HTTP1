@@ -67,6 +67,34 @@ for my $bad_chunk (
         'chunk framing error is explicit');
 }
 
+
+my $limited = Unblock::HTTP1::_Native::Chunked->new(4);
+my ($limited_done, $limited_body) = $limited->feed(
+    "4;a=1\r\nWiki\r\n0\r\n\r\n", 1
+);
+ok($limited_done, 'chunk extension at configured limit is accepted');
+is($limited_body, 'Wiki', 'limited decoder still returns payload bytes');
+
+my $oversized_extension = Unblock::HTTP1::_Native::Chunked->new(4);
+my $oversized_ok = eval {
+    $oversized_extension->feed(
+        "4;a=12\r\nWiki\r\n0\r\n\r\n", 1
+    );
+    1;
+};
+ok(!$oversized_ok, 'chunk extension beyond configured limit is rejected');
+like($@, qr/malformed HTTP\/1 chunked body/,
+    'oversized chunk extension reports framing failure');
+
+my $fragmented_extension = Unblock::HTTP1::_Native::Chunked->new(4);
+my $fragmented_ok = eval {
+    $fragmented_extension->feed("4;a", 1);
+    $fragmented_extension->feed("=12\r\nWiki\r\n0\r\n\r\n", 1);
+    1;
+};
+ok(!$fragmented_ok,
+    'chunk extension budget is retained across fragmented input');
+
 my $trailers = Unblock::HTTP1::_Native->parse_trailers($left);
 ok($trailers->{ok}, 'trailer block parses separately');
 is_deeply($trailers->{headers}, [ [ 'X-End', 'yes' ] ], 'trailer field retained');
