@@ -66,6 +66,102 @@ sub input {
     return length $copy;
 }
 
+sub _input_borrowed {
+    my ($self, $bytes) = @_;
+    croak '_input_borrowed(): cannot be called recursively from an engine callback'
+        if $self->{driving};
+    return (4, 0) if $self->{switched};
+    return (3, 0) if $self->{closed};
+    croak '_input_borrowed(): cannot mix borrowed input with buffered portable input'
+        if length $self->{input};
+
+    my ($status, $consumed);
+    {
+        local $self->{borrowed_input} = $bytes;
+        local $self->{borrowed_offset} = 0;
+        local $self->{driving} = 1;
+        $self->_drive;
+
+        $consumed = $self->{borrowed_offset};
+        my $remaining = $self->_input_length;
+
+        if ($self->{closed}) {
+            $status = 3;
+        } elsif ($self->{switched}) {
+            $status = 4;
+        } elsif ($remaining && $self->_borrowed_should_buffer_tail) {
+            $self->{input} .= substr($bytes, $self->{borrowed_offset});
+            $self->{borrowed_offset} = length($bytes);
+            $consumed = $self->{borrowed_offset};
+            $status = 0;
+        } elsif ($remaining) {
+            $status = 1;
+        } else {
+            $status = 0;
+        }
+    }
+
+    return ($status, $consumed);
+}
+
+sub _input_length {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        return length($self->{borrowed_input}) - $self->{borrowed_offset};
+    }
+    return length $self->{input};
+}
+
+sub _input_window {
+    my ($self) = @_;
+    return ($self->{borrowed_input}, $self->{borrowed_offset})
+        if exists $self->{borrowed_input};
+    return ($self->{input}, 0);
+}
+
+sub _input_take {
+    my ($self, $length) = @_;
+    return '' unless $length;
+    if (exists $self->{borrowed_input}) {
+        my $offset = $self->{borrowed_offset};
+        my $bytes = substr($self->{borrowed_input}, $offset, $length);
+        $self->{borrowed_offset} += $length;
+        return $bytes;
+    }
+    return substr($self->{input}, 0, $length, '');
+}
+
+sub _input_discard {
+    my ($self, $length) = @_;
+    return unless $length;
+    if (exists $self->{borrowed_input}) {
+        $self->{borrowed_offset} += $length;
+        return;
+    }
+    substr($self->{input}, 0, $length, '');
+    return;
+}
+
+sub _input_clear {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        $self->{borrowed_offset} = length($self->{borrowed_input});
+    } else {
+        $self->{input} = '';
+    }
+    return;
+}
+
+sub _input_remaining {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        return substr($self->{borrowed_input}, $self->{borrowed_offset});
+    }
+    return $self->{input};
+}
+
+sub _borrowed_should_buffer_tail { 0 }
+
 sub input_eof {
     my ($self) = @_;
     return $self if $self->{eof};
@@ -119,8 +215,10 @@ sub _mark_switched {
     my ($self) = @_;
     return if $self->{switched};
     $self->{switched} = 1;
-    $self->{remainder} .= $self->{input};
-    $self->{input} = '';
+    if (!exists $self->{borrowed_input}) {
+        $self->{remainder} .= $self->{input};
+        $self->{input} = '';
+    }
     return;
 }
 
