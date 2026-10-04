@@ -9,3 +9,9 @@ Revision history for Unblock-HTTP1
     - Lossless HTTP/1 trailer delivery into Uniform::HTTP messages.
     - Streaming request and response bodies with cooperative backpressure.
     - Informational responses and exact 101/CONNECT protocol handoff boundary.
+    - HTTP/1 parity pass for CONNECT and Upgrade validation.
+    - RFC-correct HEAD, 1xx, 204, 205, and 304 response framing.
+    - Expect: 100-continue handling before application body delivery.
+    - HTTP/1.0 persistence and close-delimited streaming parity.
+    - EOF truncation, cancellation, early-final-response, and backpressure tests.
+    - Expanded framing, fragmentation, queue/reuse, and configured-limit tests.
