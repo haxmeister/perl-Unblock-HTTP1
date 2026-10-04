@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP1
 
-0.02
+0.02  2026-10-04
     - Use the Uniform::HTTP 0.05 FastPath ABI for trusted receive
       construction and canonical request/response serialization.
     - Adopt parser-produced header storage without repeating Uniform field
