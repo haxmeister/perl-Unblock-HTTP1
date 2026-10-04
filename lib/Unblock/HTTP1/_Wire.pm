@@ -307,6 +307,8 @@ sub _validate_request_target {
     $method = _bytes('request method', $method);
     $target = _bytes('request target', $target);
 
+    croak 'HTTP/1 request target must not contain whitespace or control bytes'
+        if $target =~ /[\x00-\x20\x7f]/;
     croak 'HTTP/1 request target must not contain a fragment'
         if index($target, '#') >= 0;
 
@@ -330,6 +332,30 @@ sub _validate_request_target {
 
     croak 'HTTP/1 request target must use origin-form, absolute-form, '
         . 'CONNECT authority-form, or OPTIONS asterisk-form';
+}
+
+sub _absolute_form_host {
+    my ($target) = @_;
+    return (0, undef)
+        unless $target =~ /\A([A-Za-z][A-Za-z0-9+.-]*):(.*)\z/s;
+
+    my $scheme = _lc($1);
+    my $rest = $2;
+
+    # An absolute URI without an authority component requires an empty Host.
+    return (1, '') unless substr($rest, 0, 2) eq '//';
+
+    my $authority = substr($rest, 2);
+    $authority =~ s{[/?].*\z}{}s;
+
+    croak 'http(s) absolute-form request target requires a non-empty authority'
+        if ($scheme eq 'http' || $scheme eq 'https') && $authority eq '';
+    croak 'http(s) absolute-form request target must not contain userinfo'
+        if ($scheme eq 'http' || $scheme eq 'https') && index($authority, '@') >= 0;
+
+    # Generic URI schemes can carry userinfo. Host excludes it.
+    $authority =~ s/\A.*@//s;
+    return (1, $authority);
 }
 
 sub _upgrade_tokens {
@@ -486,6 +512,8 @@ sub _simple_request_plan {
 
     my $target = _bytes('request target', $request->target);
     _validate_request_target($method, $target);
+    my ($absolute_form) = _absolute_form_host($target);
+    return if $absolute_form;
     my $count = $request->header_count;
     return unless defined $count;
 
@@ -640,7 +668,17 @@ sub request_plan {
 
     my $host = _values($fields, 'Host');
     croak 'HTTP/1 request must not contain multiple Host fields' if @$host > 1;
-    if (!@$host && $version eq '1.1') {
+
+    my ($absolute_form, $absolute_host) = _absolute_form_host($target);
+    if ($version eq '1.1' && $absolute_form) {
+        if (@$host) {
+            croak 'HTTP/1.1 absolute-form Host must match request-target authority'
+                if $host->[0] ne $absolute_host;
+        } else {
+            $fields = [ @$fields, [ 'Host', $absolute_host ] ];
+            $host = [ $absolute_host ];
+        }
+    } elsif (!@$host && $version eq '1.1') {
         my $authority = $request->can('authority') ? $request->authority : undef;
         croak 'HTTP/1.1 request requires Host or Uniform authority metadata'
             unless defined $authority;
