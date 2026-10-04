@@ -47,7 +47,8 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 
 - Incremental fixed-length request and response bodies.
 - Incremental chunked request and response bodies.
-- Chunk extensions accepted by the parser backend.
+- Chunk extensions accepted by the parser backend with a configurable
+  cumulative extension-byte budget.
 - Empty streaming writes do not emit a terminating chunk.
 - Trailer fields remain separate from initial headers.
 - Ordered trailer fields are stored in Uniform::HTTP.
