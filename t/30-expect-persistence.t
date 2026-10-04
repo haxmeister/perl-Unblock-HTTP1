@@ -140,10 +140,11 @@ subtest 'server cannot send informational response to HTTP/1.0 client' => sub {
         qr/HTTP\/1\.0 clients cannot receive 1xx responses/,
         'informational response attempt fails explicitly',
     );
-    unlike($server->output, qr/\AHTTP\/1\.0 1[0-9][0-9]/,
+    my $wire = $server->output;
+    unlike($wire, qr/\AHTTP\/1\.0 1[0-9][0-9]/,
         'no 1xx response reaches the HTTP/1.0 wire');
     is(
-        $server->output,
+        $wire,
         "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok",
         'final HTTP/1.0 response remains valid',
     );
