@@ -4,6 +4,7 @@ use ExtUtils::MakeMaker;
 
 my %prereq = (
     'Carp'          => 0,
+    'Config'        => 0,
     'Scalar::Util'  => 0,
     'Uniform::HTTP' => '0.04',
     'XSLoader'      => 0,
