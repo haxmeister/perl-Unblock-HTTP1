@@ -64,7 +64,7 @@ cmpthese(
                 "Host: example.test\r\n" .
                 "User-Agent: Unblock-Benchmark\r\n" .
                 "Accept: */*\r\n\r\n";
-            die unless length($wire) == 108;
+            die unless length($wire) == 91;
         },
         response_assemble => sub {
             my $wire =
