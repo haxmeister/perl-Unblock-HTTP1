@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feature/native-borrowed-input
     paths:
       - 'bench/**'
       - 'lib/Unblock/HTTP1.pm'
