@@ -118,7 +118,7 @@ subtest 'Host and persistence rules' => sub {
     ok($http10_keep->{keep_alive}, 'HTTP/1.0 keep-alive option enables persistence');
 };
 
-subtest 'obsolete folding and unsupported versions are rejected' => sub {
+subtest 'obsolete folding is rejected and higher HTTP/1 minors interoperate' => sub {
     my $folded = parse(
         "GET / HTTP/1.1\r\nHost: example.test\r\n" .
         "X-Test: one\r\n two\r\n\r\n"
@@ -129,8 +129,15 @@ subtest 'obsolete folding and unsupported versions are rejected' => sub {
     my $version = parse(
         "GET / HTTP/1.9\r\nHost: example.test\r\n\r\n"
     );
-    ok(!$version->{ok}, 'unknown HTTP/1 minor version is rejected');
-    is($version->{status}, 505, 'unsupported version maps to 505');
+    ok($version->{ok}, 'higher HTTP/1 minor version is accepted');
+    is($version->{version}, '1.9', 'actual received minor version is retained');
+    ok($version->{keep_alive},
+        'higher HTTP/1 minor uses HTTP/1.1 persistence semantics');
+
+    my $missing_host = parse("GET / HTTP/1.9\r\n\r\n");
+    ok(!$missing_host->{ok},
+        'higher HTTP/1 minor still uses HTTP/1.1 Host requirements');
+    is($missing_host->{status}, 400, 'missing Host remains a request error');
 };
 
 done_testing;
