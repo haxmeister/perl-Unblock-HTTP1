@@ -14,9 +14,11 @@ is $definition->{abi_version}, 1, 'borrowed input ABI version is 1';
 ok $definition->{operations_address}, 'borrowed input ABI exposes native operations';
 
 my @events;
+my $native_request;
 my $server = Unblock::HTTP1::Server->new(
     on_request => sub {
-        my ($tx) = @_;
+        my ($tx, $request) = @_;
+        $native_request = $request;
         push @events, 'request';
         $tx->respond(Uniform::HTTP::Response->new(
             status => 200,
@@ -41,6 +43,12 @@ is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
 is $consumed, length($request_wire), 'complete request reports exact consumed prefix';
 is_deeply \@events, [qw(request request_end)],
     'borrowed request follows ordinary server lifecycle';
+is ref($native_request), 'Uniform::HTTP::Request',
+    'native receive constructs the canonical Uniform request class';
+is $native_request->target, '/borrowed',
+    'native receive preserves the request target';
+is $native_request->header('Host'), 'example.test',
+    'native receive preserves canonical header values';
 like $server->output, qr/\AHTTP\/1\.1 200 OK\r\n/,
     'borrowed request produces ordinary response output';
 
