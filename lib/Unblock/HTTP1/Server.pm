@@ -278,6 +278,8 @@ sub _transaction_informational {
     my $status = $response->status;
     croak 'send_informational(): status must be 100 through 199 except 101'
         unless $status >= 100 && $status < 200 && $status != 101;
+    croak 'send_informational(): HTTP/1.0 clients cannot receive 1xx responses'
+        if ($tx->request->version || '1.1') eq '1.0';
     my $plan = Unblock::HTTP1::_Wire::response_plan($tx->request, $response);
     $self->_queue_output($plan->{wire});
     return $tx;
