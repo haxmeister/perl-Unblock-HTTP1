@@ -1,5 +1,9 @@
 ^\.git/
 ^\.github/
+^\.gitignore$
+^bench/
+^docs/ARCHITECTURE\.md$
+^docs/TRUSTED_UNIFORM\.md$
 ^blib/
 ^Makefile$
 ^MYMETA\.
