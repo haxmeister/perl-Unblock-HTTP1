@@ -82,6 +82,18 @@ sub _start_next {
 
 sub _drive {
     my ($self) = @_;
+
+    if (!$self->{closed} && !$self->{switched}
+        && !$self->{active} && length($self->{input})) {
+        if ($self->{input} =~ /\A(?:\r\n)+\z/) {
+            $self->{input} = '';
+            return;
+        }
+        return $self->_connection_error(
+            'HTTP/1 response bytes received with no outstanding request'
+        );
+    }
+
     while (!$self->{closed} && !$self->{switched} && $self->{active}) {
         my $tx = $self->{active};
         my $rx = $self->{rx};
