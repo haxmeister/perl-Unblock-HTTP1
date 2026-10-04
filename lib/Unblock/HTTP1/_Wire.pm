@@ -5,10 +5,80 @@ use warnings;
 use Carp qw(croak);
 use Config ();
 use utf8 ();
+use Uniform::HTTP::FastPath ();
 
 my $MAX_CONTENT_LENGTH = $Config::Config{uvsize} >= 8
     ? '18446744073709551615'
     : '4294967295';
+
+sub _request_from_validated_head {
+    my ($head, %metadata) = @_;
+
+    my $flags =
+        Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
+        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS()
+        | Uniform::HTTP::FastPath::FLAG_TARGET_EXACT();
+
+    if ($head->{body_mode} eq 'none') {
+        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
+    } else {
+        $flags |=
+            Uniform::HTTP::FastPath::FLAG_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
+    }
+
+    return Uniform::HTTP::FastPath::request_from_validated([
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_REQUEST(),
+        $flags,
+        $head->{version},
+        $head->{method},
+        $head->{target},
+        $metadata{scheme},
+        $metadata{authority},
+        $metadata{protocol},
+        undef,
+        undef,
+        $head->{headers},
+        [],
+        undef,
+    ]);
+}
+
+sub _response_from_validated_head {
+    my ($head, $informational) = @_;
+
+    my $flags =
+        Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
+        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS();
+
+    if ($informational) {
+        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
+    } else {
+        $flags |=
+            Uniform::HTTP::FastPath::FLAG_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
+    }
+
+    return Uniform::HTTP::FastPath::response_from_validated([
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_RESPONSE(),
+        $flags,
+        $head->{version},
+        undef,
+        undef,
+        undef,
+        undef,
+        undef,
+        $head->{status},
+        $head->{reason},
+        $head->{headers},
+        [],
+        undef,
+    ]);
+}
 
 my %REASON = (
     100 => 'Continue', 101 => 'Switching Protocols', 103 => 'Early Hints',
