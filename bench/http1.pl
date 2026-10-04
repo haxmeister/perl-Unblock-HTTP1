@@ -27,6 +27,7 @@ my $response_wire =
     "Content-Type: text/plain\r\n" .
     "Content-Length: 5\r\n" .
     "\r\n";
+my $response_exchange_wire = $response_wire . 'hello';
 
 my $request = Uniform::HTTP::Request->new(
     method  => 'GET',
@@ -74,6 +75,13 @@ my $reuse_get_server = Unblock::HTTP1::Server->new(
     },
 );
 my $reuse_get_client = Unblock::HTTP1::Client->new;
+
+my $server_cycle = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        $_[0]->respond($response);
+    },
+);
+my $client_cycle = Unblock::HTTP1::Client->new;
 
 my $reuse_fixed_request_bytes = 0;
 my $reuse_fixed_response_bytes = 0;
@@ -133,6 +141,18 @@ cmpthese(
         serialize_response => sub {
             my $plan = Unblock::HTTP1::_Wire::response_plan($request, $response);
             die "serialize failure" unless length $plan->{wire};
+        },
+        server_get_cycle => sub {
+            $server_cycle->input($request_wire);
+            my $wire = $server_cycle->output;
+            die "server cycle failure"
+                unless $wire =~ /\AHTTP\/1\.1 200 OK\r\n/;
+        },
+        client_get_cycle => sub {
+            my $tx = $client_cycle->request($request);
+            $client_cycle->output;
+            $client_cycle->input($response_exchange_wire);
+            die "client cycle failure" unless $tx->is_complete;
         },
         reuse_get => sub {
             my $tx = $reuse_get_client->request($request);
