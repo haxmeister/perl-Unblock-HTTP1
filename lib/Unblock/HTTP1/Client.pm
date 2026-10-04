@@ -478,8 +478,9 @@ open a socket or run an event loop. Feed received bytes with C<input()>, signal
 transport EOF with C<input_eof()>, and drain generated wire bytes with
 C<output()>.
 
-Requests are queued serially. HTTP/1 pipelining policy is intentionally left
-for a later explicit API rather than being enabled implicitly.
+Requests are queued serially. This Client API intentionally does not pipeline
+requests on one connection. Callers that need parallel HTTP/1 work can use
+multiple connections without changing the protocol engine.
 
 When a 101 response or successful CONNECT switches away from HTTP, the engine
 stops HTTP parsing. C<take_remainder()> returns bytes that followed the HTTP
