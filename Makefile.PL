@@ -8,6 +8,8 @@ my %prereq = (
     'Scalar::Util'  => 0,
     'Uniform::HTTP' => '0.04',
     'XSLoader'      => 0,
+    'parent'        => 0,
+    'utf8'          => 0,
 );
 
 my %makefile = (
