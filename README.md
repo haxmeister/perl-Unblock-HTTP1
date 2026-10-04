@@ -112,6 +112,14 @@ representation decoding.
 Request bodies arrive incrementally through on_body. on_request_end runs after
 the complete request body and any trailers have arrived.
 
+For outgoing messages with known trailers, Unblock adds a Trailer header that
+announces their field names. Streaming producers that decide trailer names
+later can predeclare them with an explicit Trailer header.
+
+HTTP/1.1 TE negotiation is also handled at the wire boundary. Client requests
+that contain TE are emitted with Connection: TE, and a server will only apply
+a non-chunked response transfer coding that the request actually accepted.
+
 ## Informational responses
 
 A server can emit 100, 102, 103, or another non-101 informational response
