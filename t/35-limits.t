@@ -82,4 +82,44 @@ subtest 'chunk trailer limit is enforced independently' => sub {
     is($tx->state, 'error', 'oversized trailers make Transaction error');
 };
 
+
+subtest 'chunk extension size limit rejects oversized request framing' => sub {
+    my $hits = 0;
+    my $server = Unblock::HTTP1::Server->new(
+        max_chunk_extension_size => 4,
+        on_request => sub { ++$hits },
+    );
+
+    $server->input(
+        "POST / HTTP/1.1\r\n" .
+        "Host: example.test\r\n" .
+        "Transfer-Encoding: chunked\r\n\r\n" .
+        "1;abcde\r\nx\r\n0\r\n\r\n"
+    );
+
+    is($hits, 1, 'request head is delivered before body framing fails');
+    like($server->output, qr/\AHTTP\/1\.1 400 Bad Request\r\n/,
+        'oversized chunk extension receives 400');
+    ok($server->is_closed, 'oversized chunk extension closes connection');
+};
+
+subtest 'zero chunk extension limit opts out of the extension budget' => sub {
+    my $body = '';
+    my $server = Unblock::HTTP1::Server->new(
+        max_chunk_extension_size => 0,
+        on_request => sub { },
+        on_body => sub { $body .= $_[2] },
+    );
+
+    $server->input(
+        "POST / HTTP/1.1\r\n" .
+        "Host: example.test\r\n" .
+        "Transfer-Encoding: chunked\r\n\r\n" .
+        "1;" . ('a' x 100) . "\r\nx\r\n0\r\n\r\n"
+    );
+
+    is($body, 'x', 'zero limit permits long chunk extensions');
+    ok(!$server->is_closed, 'unlimited extension setting remains usable');
+};
+
 done_testing;
