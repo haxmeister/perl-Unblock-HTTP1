@@ -587,7 +587,8 @@ sub response_plan {
         : $request_version eq '1.1' ? 1
         : $request_tokens->{'keep-alive'} ? 1 : 0;
     my $keep_alive = $request_keep && !$response_tokens->{close} && !$close_after && !$switch;
-    if (!$keep_alive && !$switch && !$response_tokens->{close}) {
+    if (!$keep_alive && !$switch && $request_version eq '1.1'
+        && !$response_tokens->{close}) {
         $fields = [ @$fields, [ 'Connection', 'close' ] ];
     } elsif ($keep_alive && $request_version eq '1.0' && !$response_tokens->{'keep-alive'}) {
         $fields = [ @$fields, [ 'Connection', 'keep-alive' ] ];
