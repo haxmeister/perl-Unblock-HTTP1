@@ -394,14 +394,30 @@ sub response_receive_plan {
         };
     }
 
+    my $tokens = _connection_tokens($fields);
+    my $keep_alive = $tokens->{close} ? 0
+        : $head->{version} eq '1.1' ? 1
+        : $tokens->{'keep-alive'} ? 1 : 0;
+
+    # HEAD and 304 never carry HTTP content. Content-Length and
+    # Transfer-Encoding, when present, describe the corresponding selected
+    # representation rather than framing bytes on this message.
+    if (uc($method) eq 'HEAD' || $status == 304) {
+        return {
+            mode       => 'none',
+            remaining  => undef,
+            switch     => 0,
+            keep_alive => $keep_alive,
+        };
+    }
+
     my $cl = _content_length($fields);
     my $te = _transfer_encoding($fields);
     croak 'response contains both Transfer-Encoding and Content-Length'
         if @$te && defined $cl;
 
-    my $body_forbidden = $method eq 'HEAD'
-        || ($status >= 100 && $status < 200)
-        || $status == 204 || $status == 205 || $status == 304;
+    my $body_forbidden = ($status >= 100 && $status < 200)
+        || $status == 204 || $status == 205;
 
     croak '1xx and 204 responses must not contain Content-Length'
         if (($status >= 100 && $status < 200) || $status == 204) && defined $cl;
@@ -423,10 +439,6 @@ sub response_receive_plan {
         }
     }
 
-    my $tokens = _connection_tokens($fields);
-    my $keep_alive = $tokens->{close} ? 0
-        : $head->{version} eq '1.1' ? 1
-        : $tokens->{'keep-alive'} ? 1 : 0;
     $keep_alive = 0 if $mode eq 'close';
 
     return {
@@ -491,7 +503,11 @@ sub response_plan {
             && ((defined($body) && length($body)) || $stream_body || @$trailers);
 
     my $cl = _content_length($fields);
-    my $te = _transfer_encoding($fields);
+    my $metadata_only_framing = $head_only || $status == 304 ? 1 : 0;
+    my $raw_te = _values($fields, 'Transfer-Encoding');
+    my $te = $metadata_only_framing
+        ? (@$raw_te ? [ 'metadata-only' ] : [])
+        : _transfer_encoding($fields);
     croak 'response cannot contain both Transfer-Encoding and Content-Length'
         if !$connect_switch && @$te && defined $cl;
 
@@ -525,10 +541,16 @@ sub response_plan {
             if (($status >= 100 && $status < 200) || $status == 204) && defined $cl;
         croak '205 response Content-Length must be zero'
             if $status == 205 && defined($cl) && $cl != 0;
-        croak 'bodyless response must not contain Transfer-Encoding' if @$te;
+        croak 'bodyless response must not contain Transfer-Encoding'
+            if $status != 304 && @$te;
+        croak 'HTTP/1.0 cannot send Transfer-Encoding metadata'
+            if $status == 304 && @$te && $request_version eq '1.0';
     } elsif ($head_only) {
-        croak 'HEAD response must not use Transfer-Encoding for a body' if @$te;
-        if (!defined $cl && defined $body) {
+        croak 'HEAD response cannot stream a body' if $stream_body;
+        croak 'HEAD response cannot carry trailer fields' if @$trailers;
+        croak 'HTTP/1.0 cannot send Transfer-Encoding metadata'
+            if @$te && $request_version eq '1.0';
+        if (!defined $cl && !@$te && defined $body) {
             $fields = [ @$fields, [ 'Content-Length', length($body) ] ];
         }
     } elsif (@$trailers) {
