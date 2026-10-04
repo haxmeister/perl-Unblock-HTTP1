@@ -31,6 +31,10 @@ Revision history for Unblock-HTTP1
     - Added an explicit distribution MANIFEST and CI disttest coverage.
     - Documented the portable Linux::Event adapter and optional native bridge
       boundary without introducing Linux-specific engine code.
+    - Originating response transfer-coding chains now mirror receive framing:
+      final chunked is owned by Unblock and non-chunked final codings close.
+    - Received absolute-form and CONNECT requests expose explicit Uniform
+      routing metadata from the request-target while preserving raw Host bytes.
     - Hardened request-target form validation and HTTP method case sensitivity.
     - Rejected unsolicited bytes beyond a final client response boundary to
       prevent queued-response poisoning.
