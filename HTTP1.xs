@@ -441,11 +441,12 @@ pico_version(CLASS)
     RETVAL
 
 SV *
-parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
+parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     const char *CLASS
     SV *buffer
     UV last_len
     UV max_headers
+    UV offset
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
@@ -478,8 +479,12 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
   CODE:
     (void)CLASS;
     buf = SvPVbyte(buffer, buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
     if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
     count = (size_t)max_headers;
@@ -611,11 +616,12 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
     RETVAL
 
 SV *
-parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100)
+parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     const char *CLASS
     SV *buffer
     UV last_len
     UV max_headers
+    UV offset
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
@@ -631,8 +637,12 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100)
   CODE:
     (void)CLASS;
     buf = SvPVbyte(buffer, buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
     if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
     count = (size_t)max_headers;
@@ -663,11 +673,12 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100)
     RETVAL
 
 SV *
-parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
+parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     const char *CLASS
     SV *buffer
     UV last_len
     UV max_headers
+    UV offset
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
@@ -679,8 +690,12 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
   CODE:
     (void)CLASS;
     buf = SvPVbyte(buffer, buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
     if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
     count = (size_t)max_headers;
@@ -723,10 +738,11 @@ new(CLASS, max_chunk_extension_size = 16384)
     RETVAL
 
 void
-feed(self, input, emit = 1)
+feed(self, input, emit = 1, offset = 0)
     SV *self
     SV *input
     int emit
+    UV offset
   PREINIT:
     struct phr_chunked_decoder *decoder;
     SV *inner;
@@ -743,6 +759,10 @@ feed(self, input, emit = 1)
     decoder = INT2PTR(struct phr_chunked_decoder *, SvIV(inner));
     if (!decoder) croak("chunked decoder has already been released");
     input_bytes = SvPVbyte(input, input_len);
+    if (offset > (UV)input_len)
+        croak("offset exceeds input length");
+    input_bytes += (size_t)offset;
+    input_len -= (STRLEN)offset;
     Newx(scratch, input_len ? input_len : 1, char);
     if (input_len) Copy(input_bytes, scratch, input_len, char);
     decoded_len = (size_t)input_len;
