@@ -2,7 +2,14 @@ use strict;
 use warnings;
 use ExtUtils::MakeMaker;
 
-WriteMakefile(
+my %prereq = (
+    'Carp'          => 0,
+    'Scalar::Util'  => 0,
+    'Uniform::HTTP' => '0.04',
+    'XSLoader'      => 0,
+);
+
+my %makefile = (
     NAME             => 'Unblock::HTTP1',
     VERSION_FROM     => 'lib/Unblock/HTTP1.pm',
     ABSTRACT_FROM    => 'lib/Unblock/HTTP1.pm',
@@ -12,13 +19,7 @@ WriteMakefile(
     CONFIGURE_REQUIRES => {
         'ExtUtils::MakeMaker' => 0,
     },
-    PREREQ_PM => {
-        'Carp'          => 0,
-        'Scalar::Util'  => 0,
-        'Test::More'    => 0,
-        'Uniform::HTTP' => '0.04',
-        'XSLoader'      => 0,
-    },
+    PREREQ_PM => \%prereq,
     XS => { 'HTTP1.xs' => 'HTTP1.c' },
     clean => { FILES => 'HTTP1.c' },
     META_MERGE => {
@@ -36,3 +37,15 @@ WriteMakefile(
         },
     },
 );
+
+if (eval { ExtUtils::MakeMaker->VERSION('6.64'); 1 }) {
+    $makefile{TEST_REQUIRES} = {
+        'Test::More' => 0,
+    };
+} else {
+    # Older MakeMaker does not understand TEST_REQUIRES. Keep installation
+    # compatible by falling back to the traditional runtime prerequisite.
+    $makefile{PREREQ_PM}{'Test::More'} = 0;
+}
+
+WriteMakefile(%makefile);
