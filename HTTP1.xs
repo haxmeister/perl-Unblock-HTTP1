@@ -821,15 +821,16 @@ ub_http1_parse_response_head_result(
     hv = newHV();
     hv_store(hv, "ok", 2, newSViv(1), 0);
     hv_store(hv, "consumed", 8, newSViv(consumed), 0);
-    hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
     hv_store(hv, "status", 6, newSViv(status), 0);
-    if (native_response == NULL)
+    if (native_response == NULL) {
+        hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
         hv_store(
             hv, "reason", 6,
             newSVpvn(reason, (STRLEN)reason_len), 0
         );
-    list = headers_to_av(aTHX_ headers, count);
-    hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+        list = headers_to_av(aTHX_ headers, count);
+        hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+    }
 
     return newRV_noinc((SV *)hv);
 }
