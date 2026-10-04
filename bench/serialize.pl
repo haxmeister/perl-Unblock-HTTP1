@@ -52,6 +52,20 @@ die "request parse setup failed" unless $request_head && $request_head->{ok};
 die "response parse setup failed" unless $response_head && $response_head->{ok};
 
 my $transaction_owner = bless {}, 'Unblock::HTTP1::Benchmark::Owner';
+my $callback_count = 0;
+my $callback = sub {
+    ++$callback_count;
+    return;
+};
+my $callback_tx = Unblock::HTTP1::Transaction->_new(
+    $transaction_owner,
+    $request,
+    callbacks => { on_complete => $callback },
+);
+my $callback_server = Unblock::HTTP1::Server->new(
+    on_request => $callback,
+);
+my $lifecycle_response = Uniform::HTTP::Response->new(status => 200);
 
 print "Unblock::HTTP1 $Unblock::HTTP1::VERSION serialization diagnostic\n";
 print "Perl $] ($Config{archname})\n";
@@ -157,6 +171,22 @@ cmpthese(
                 $request,
             );
             die unless $value->request == $request;
+        },
+        direct_callback => sub {
+            $callback->();
+        },
+        transaction_callback => sub {
+            my $ok = $callback_tx->_invoke('on_complete');
+            die unless $ok eq '1';
+        },
+        server_callback => sub {
+            my $ok = $callback_server->_invoke_server(
+                'on_request', undef, $request,
+            );
+            die unless $ok eq '1';
+        },
+        response_complete_freeze => sub {
+            $lifecycle_response->mark_complete->freeze;
         },
     },
 );
