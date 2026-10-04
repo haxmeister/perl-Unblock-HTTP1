@@ -7,6 +7,7 @@ use Config;
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 use Unblock::HTTP1;
+use Unblock::HTTP1::Server;
 use Unblock::HTTP1::Transaction;
 use Unblock::HTTP1::_Native;
 use Unblock::HTTP1::_Wire;
