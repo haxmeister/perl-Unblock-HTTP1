@@ -3,7 +3,7 @@ package Unblock::HTTP1;
 use strict;
 use warnings;
 
-our $VERSION = '0.001';
+our $VERSION = '0.01';
 
 require XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -14,7 +14,7 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP1 - Event-loop neutral HTTP/1 protocol engine
+Unblock::HTTP1 - Portable non-blocking HTTP/1 protocol engine
 
 =head1 SYNOPSIS
 
@@ -22,7 +22,8 @@ Unblock::HTTP1 - Event-loop neutral HTTP/1 protocol engine
     use Unblock::HTTP1::Client;
 
     my $client = Unblock::HTTP1::Client->new;
-    my $tx = $client->request(
+
+    $client->request(
         Uniform::HTTP::Request->new(
             method    => 'GET',
             target    => '/',
@@ -35,19 +36,28 @@ Unblock::HTTP1 - Event-loop neutral HTTP/1 protocol engine
     );
 
     $client->input($bytes_from_transport);
-    my $wire = $client->output while $client->want_write;
+
+    while ($client->want_write) {
+        my $bytes = $client->output;
+        $transport->write($bytes);
+    }
 
 =head1 DESCRIPTION
 
-Unblock::HTTP1 is a non-blocking HTTP/1.0 and HTTP/1.1 protocol engine.
-It owns HTTP parsing, framing, serialization, message lifecycle, and protocol
-switch boundaries. It does not own sockets, TLS, DNS, an event loop, or
-connection policy.
+Unblock::HTTP1 is a portable HTTP/1.0 and HTTP/1.1 protocol engine.
 
-The public HTTP message objects are L<Uniform::HTTP::Request> and
+It handles parsing, serialization, message framing, streaming bodies,
+persistent connections, informational responses, trailers, Upgrade, and
+CONNECT.
+
+It does not open sockets, perform DNS or TLS, choose an event loop, or manage
+connection pools.
+
+HTTP messages use L<Uniform::HTTP::Request> and
 L<Uniform::HTTP::Response>.
 
-See L<Unblock::HTTP1::Client> and L<Unblock::HTTP1::Server>.
+See L<Unblock::HTTP1::Client>, L<Unblock::HTTP1::Server>, and
+L<Unblock::HTTP1::Transaction>.
 
 =head1 LICENSE
 
