@@ -239,6 +239,17 @@ sub _finish_response {
     $rx->{response}->mark_complete->freeze;
     $tx->_mark_remote_done;
     $tx->{keep_alive} = $rx->{keep_alive} ? 1 : 0;
+
+    # A final response can arrive before an incremental request body has
+    # finished. The peer has already ended this HTTP exchange, so no further
+    # request-body bytes may be sent and the connection cannot be reused.
+    if ($tx->{stream_body} && !$tx->{local_done}) {
+        $tx->{request_body_cancelled} = 1;
+        $tx->_mark_local_done;
+        $tx->{keep_alive} = 0;
+        $self->{output} = '';
+    }
+
     $self->_retire_if_done;
     return;
 }
