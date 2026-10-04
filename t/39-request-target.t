@@ -165,6 +165,55 @@ subtest 'outgoing request target uses the same form rules' => sub {
         qr/\AGET http:\/\/example\.test\/path HTTP\/1\.1\r\n/,
         'absolute-form serializes unchanged',
     );
+
+    my $absolute_no_host = Uniform::HTTP::Request->new(
+        method => 'GET',
+        target => 'http://example.test/path',
+    );
+    like(
+        Unblock::HTTP1::_Wire::request_plan($absolute_no_host)->{wire},
+        qr/\r\nHost: example\.test\r\n/,
+        'absolute-form synthesizes Host from request-target authority',
+    );
+
+    my $mismatch = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => 'http://example.test/path',
+        headers => [ [ Host => 'other.test' ] ],
+    );
+    my $mismatch_ok = eval {
+        Unblock::HTTP1::_Wire::request_plan($mismatch);
+        1;
+    };
+    ok(!$mismatch_ok, 'absolute-form Host mismatch is rejected');
+    like($@, qr/absolute-form Host must match/,
+        'absolute-form mismatch error is explicit');
+
+    my $userinfo = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => 'http://user\@example.test/path',
+        headers => [ [ Host => 'example.test' ] ],
+    );
+    my $userinfo_ok = eval {
+        Unblock::HTTP1::_Wire::request_plan($userinfo);
+        1;
+    };
+    ok(!$userinfo_ok, 'http absolute-form userinfo is rejected');
+    like($@, qr/must not contain userinfo/,
+        'userinfo rejection is explicit');
+
+    my $space = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => '/bad path',
+        headers => [ [ Host => 'example.test' ] ],
+    );
+    my $space_ok = eval {
+        Unblock::HTTP1::_Wire::request_plan($space);
+        1;
+    };
+    ok(!$space_ok, 'outgoing request-target whitespace is rejected');
+    like($@, qr/whitespace or control/,
+        'request-target whitespace error is explicit');
 };
 
 done_testing;
