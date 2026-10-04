@@ -59,3 +59,7 @@ Revision history for Unblock-HTTP1
     - Kept informational responses on the dedicated send_informational() API.
     - Allowed Content-Length: 0 on CONNECT requests while still rejecting
       request content and Transfer-Encoding.
+    - Enforced HTTP/1.1 TE negotiation, including Connection: TE,
+      qvalues, implicit chunked acceptance, and response-coding selection.
+    - Known outgoing trailer names are announced automatically with Trailer
+      while late streaming trailers can still be predeclared explicitly.
