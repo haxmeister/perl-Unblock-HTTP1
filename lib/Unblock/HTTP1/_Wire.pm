@@ -276,12 +276,12 @@ sub _validate_host_value {
 
     if (substr($value, 0, 1) eq '[') {
         croak 'invalid Host field'
-            unless $value =~ /\A\[[^\]]+\](?::[0-9]+)?\z/;
+            unless $value =~ /\A\[[^\]]+\](?::[0-9]*)?\z/;
         return 1;
     }
 
     croak 'invalid Host field'
-        unless $value =~ /\A[^:]+(?::[0-9]+)?\z/;
+        unless $value =~ /\A[^:]+(?::[0-9]*)?\z/;
     return 1;
 }
 
@@ -308,14 +308,15 @@ sub _connect_host {
     $value = _trim(_bytes('CONNECT Host', $value));
 
     my ($host, $port);
-    if ($value =~ /\A(\[[^\]\s]+\])(?::([0-9]+))?\z/) {
+    if ($value =~ /\A(\[[^\]\s]+\])(?::([0-9]*))?\z/) {
         ($host, $port) = ($1, $2);
-    } elsif ($value =~ /\A([^:\s\/?#@]+)(?::([0-9]+))?\z/) {
+    } elsif ($value =~ /\A([^:\s\/?#@]+)(?::([0-9]*))?\z/) {
         ($host, $port) = ($1, $2);
     } else {
         croak 'CONNECT Host must contain a valid host with an optional port';
     }
 
+    $port = undef if defined($port) && $port eq '';
     croak 'CONNECT Host port must be between 1 and 65535'
         if defined($port) && ($port < 1 || $port > 65_535);
     return ($host, defined($port) ? 0 + $port : undef);
@@ -374,10 +375,14 @@ sub _absolute_form_host {
     my $authority = substr($rest, 2);
     $authority =~ s{[/?].*\z}{}s;
 
-    croak 'http(s) absolute-form request target requires a non-empty authority'
-        if ($scheme eq 'http' || $scheme eq 'https') && $authority eq '';
-    croak 'http(s) absolute-form request target must not contain userinfo'
-        if ($scheme eq 'http' || $scheme eq 'https') && index($authority, '@') >= 0;
+    if ($scheme eq 'http' || $scheme eq 'https') {
+        croak 'http(s) absolute-form request target requires a non-empty authority'
+            if $authority eq '';
+        croak 'http(s) absolute-form request target requires a non-empty host'
+            if substr($authority, 0, 1) eq ':';
+        croak 'http(s) absolute-form request target must not contain userinfo'
+            if index($authority, '@') >= 0;
+    }
 
     # Generic URI schemes can carry userinfo. Host excludes it.
     $authority =~ s/\A.*@//s;
