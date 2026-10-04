@@ -62,6 +62,15 @@ sub _field_value {
     return $value;
 }
 
+sub _status_code {
+    my ($value) = @_;
+    croak 'response status must be a three-digit integer from 100 through 599'
+        if !defined($value) || ref($value)
+        || "$value" !~ /\A[0-9]{3}\z/
+        || $value < 100 || $value > 599;
+    return 0 + $value;
+}
+
 sub _reason_phrase {
     my ($value) = @_;
     $value = _bytes('response reason', $value);
@@ -666,7 +675,7 @@ sub _simple_response_plan {
     my $response_version = $response->version;
     return if defined($response_version) && $response_version ne '1.1';
 
-    my $status = $response->status;
+    my $status = _status_code($response->status);
     return if $status < 200 || $status > 599
         || $status == 204 || $status == 205 || $status == 304;
 
@@ -944,7 +953,7 @@ sub response_plan {
         croak 'response version conflicts with supported HTTP/1 response semantics';
     }
 
-    my $status = $response->status;
+    my $status = _status_code($response->status);
     my $reason = defined($response->reason) ? _reason_phrase($response->reason)
         : ($REASON{$status} || '');
     my $fields = _fields($response, 'header');
