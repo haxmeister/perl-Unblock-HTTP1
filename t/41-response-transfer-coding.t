@@ -3,8 +3,10 @@ use warnings;
 use Test::More;
 
 use Uniform::HTTP::Request;
+use Uniform::HTTP::Response;
 use Unblock::HTTP1::Client;
 use Unblock::HTTP1::_Native;
+use Unblock::HTTP1::_Wire;
 
 sub request {
     return Uniform::HTTP::Request->new(
