@@ -67,11 +67,11 @@ sub trusted_uniform_response {
         headers           => $parsed->{headers},
         trailers          => [],
         initial_frozen    => 1,
-        trailers_frozen   => 1,
+        trailers_frozen   => 0,
         body              => undef,
         has_buffered_body => 0,
         complete          => 0,
-        mutable           => 0,
+        mutable           => 1,
         status            => $parsed->{status},
         reason            => $parsed->{reason},
     }, 'Uniform::HTTP::Response';
