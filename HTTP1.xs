@@ -2,6 +2,7 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -437,7 +438,9 @@ ub_http1_parse_request_head_result(
     const char *buf,
     size_t buffer_len,
     size_t last_len,
-    size_t max_headers
+    size_t max_headers,
+    const uhttp_native_api *uniform_api,
+    SV **request_out
 )
 {
     const char *method;
@@ -464,8 +467,14 @@ ub_http1_parse_request_head_result(
     int is_connect = 0;
     const char *host_value = NULL;
     size_t host_value_len = 0;
+    uhttp_native_field native_headers[UB_HTTP1_MAX_HEADERS];
+    char version_bytes[3];
+    SV *native_request = NULL;
     HV *hv;
     AV *list;
+
+    if (request_out != NULL)
+        *request_out = NULL;
 
     if (last_len > buffer_len)
         croak("last_len exceeds input window length");
@@ -613,14 +622,73 @@ ub_http1_parse_request_head_result(
             return new_error_result(aTHX_ error_status, error);
     }
 
+    if (uniform_api != NULL && request_out != NULL
+        && !is_connect && target_len > 0
+        && (target[0] == '/'
+            || (target_len == 1 && target[0] == '*'))) {
+        uhttp_native_input input;
+
+        uhttp_native_input_init(&input, UHTTP_KIND_REQUEST);
+        input.flags =
+            UHTTP_HEADERS_LOSSLESS
+            | UHTTP_TRAILERS_LOSSLESS
+            | UHTTP_TARGET_EXACT;
+
+        if (body_mode == UB_BODY_NONE) {
+            input.flags |= UHTTP_COMPLETE;
+        } else {
+            input.flags |=
+                UHTTP_MUTABLE
+                | UHTTP_BODY_MUTABLE
+                | UHTTP_TRAILERS_MUTABLE;
+        }
+
+        version_bytes[0] = '1';
+        version_bytes[1] = '.';
+        version_bytes[2] = (char)('0' + minor);
+        input.version.data = version_bytes;
+        input.version.len = 3;
+        input.method.data = method;
+        input.method.len = (STRLEN)method_len;
+        input.target.data = target;
+        input.target.len = (STRLEN)target_len;
+
+        for (i = 0; i < count; ++i) {
+            const char *value = headers[i].value;
+            size_t value_len = headers[i].value_len;
+
+            while (value_len && is_ows((unsigned char)*value)) {
+                ++value;
+                --value_len;
+            }
+            while (value_len
+                && is_ows((unsigned char)value[value_len - 1]))
+                --value_len;
+
+            native_headers[i].name.data = headers[i].name;
+            native_headers[i].name.len = (STRLEN)headers[i].name_len;
+            native_headers[i].value.data = value;
+            native_headers[i].value.len = (STRLEN)value_len;
+        }
+
+        input.headers = native_headers;
+        input.header_count = (Size_t)count;
+        native_request = uhttp_native_from_validated(
+            aTHX_ uniform_api, &input, UHTTP_NATIVE_TRUSTED
+        );
+        *request_out = native_request;
+    }
+
     hv = newHV();
     hv_store(hv, "ok", 2, newSViv(1), 0);
     hv_store(hv, "consumed", 8, newSViv(consumed), 0);
-    hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
-    hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
-    hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
-    list = headers_to_av(aTHX_ headers, count);
-    hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+    if (native_request == NULL) {
+        hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
+        hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
+        hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
+        list = headers_to_av(aTHX_ headers, count);
+        hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+    }
 
     if (body_mode == UB_BODY_CHUNKED)
         hv_store(hv, "body_mode", 9, newSVpvs("chunked"), 0);
@@ -660,7 +728,8 @@ typedef struct {
     CV *input_cv;
     CV *head_cv;
     CV *eof_cv;
-    CV *uniform_request_cv;
+    uhttp_native_api uniform_api;
+    int uniform_native;
     int role;
     int direct_head;
     size_t max_headers;
@@ -737,152 +806,6 @@ ub_http1_engine_method_cv(
 
     *slot = (CV *)SvREFCNT_inc((SV *)cv);
     return *slot;
-}
-
-#define UB_UHTTP_ABI_VERSION 1
-#define UB_UHTTP_KIND_REQUEST 1
-#define UB_UHTTP_FLAG_COMPLETE          0x002
-#define UB_UHTTP_FLAG_MUTABLE           0x004
-#define UB_UHTTP_FLAG_BODY_MUTABLE      0x010
-#define UB_UHTTP_FLAG_TRAILERS_MUTABLE  0x020
-#define UB_UHTTP_FLAG_HEADERS_LOSSLESS  0x040
-#define UB_UHTTP_FLAG_TRAILERS_LOSSLESS 0x080
-#define UB_UHTTP_FLAG_TARGET_EXACT      0x100
-
-static CV *
-ub_http1_uniform_request_cv(
-    pTHX_
-    ub_http1_input_context *context
-)
-{
-    CV *cv;
-
-    if (context->uniform_request_cv != NULL)
-        return context->uniform_request_cv;
-
-    cv = get_cv("Uniform::HTTP::FastPath::request_from_validated", 0);
-    if (cv == NULL)
-        croak("Uniform::HTTP fast-path request constructor is unavailable");
-
-    context->uniform_request_cv = (CV *)SvREFCNT_inc((SV *)cv);
-    return context->uniform_request_cv;
-}
-
-static SV *
-ub_http1_uniform_request_from_head(
-    pTHX_
-    ub_http1_input_context *context,
-    SV *head
-)
-{
-    HV *hv;
-    SV **method_sv;
-    SV **target_sv;
-    SV **version_sv;
-    SV **headers_sv;
-    SV **body_mode_sv;
-    const char *method;
-    const char *target;
-    const char *body_mode;
-    STRLEN method_len;
-    STRLEN target_len;
-    STRLEN body_mode_len;
-    UV flags;
-    AV *view;
-    SV *view_ref;
-    CV *cv;
-    SV *request = NULL;
-    SV *error = NULL;
-    int count;
-    dSP;
-
-    if (!SvROK(head) || SvTYPE(SvRV(head)) != SVt_PVHV)
-        return NULL;
-
-    hv = (HV *)SvRV(head);
-    method_sv = hv_fetch(hv, "method", 6, 0);
-    target_sv = hv_fetch(hv, "target", 6, 0);
-    version_sv = hv_fetch(hv, "version", 7, 0);
-    headers_sv = hv_fetch(hv, "headers", 7, 0);
-    body_mode_sv = hv_fetch(hv, "body_mode", 9, 0);
-
-    if (method_sv == NULL || target_sv == NULL || version_sv == NULL
-        || headers_sv == NULL || body_mode_sv == NULL)
-        return NULL;
-    if (!SvOK(*method_sv) || !SvOK(*target_sv) || !SvOK(*version_sv)
-        || !SvOK(*headers_sv) || !SvOK(*body_mode_sv))
-        return NULL;
-
-    method = SvPVbyte(*method_sv, method_len);
-    target = SvPVbyte(*target_sv, target_len);
-
-    if (ascii_equal_cs(method, (size_t)method_len, "CONNECT", 7))
-        return NULL;
-    if (!(target_len > 0
-        && (target[0] == '/'
-            || (target_len == 1 && target[0] == '*'))))
-        return NULL;
-
-    body_mode = SvPVbyte(*body_mode_sv, body_mode_len);
-    flags = UB_UHTTP_FLAG_HEADERS_LOSSLESS
-        | UB_UHTTP_FLAG_TRAILERS_LOSSLESS
-        | UB_UHTTP_FLAG_TARGET_EXACT;
-
-    if (body_mode_len == 4 && memEQ(body_mode, "none", 4)) {
-        flags |= UB_UHTTP_FLAG_COMPLETE;
-    } else {
-        flags |= UB_UHTTP_FLAG_MUTABLE
-            | UB_UHTTP_FLAG_BODY_MUTABLE
-            | UB_UHTTP_FLAG_TRAILERS_MUTABLE;
-    }
-
-    view = newAV();
-    av_extend(view, 13);
-    av_push(view, newSViv(UB_UHTTP_ABI_VERSION));
-    av_push(view, newSViv(UB_UHTTP_KIND_REQUEST));
-    av_push(view, newSVuv(flags));
-    av_push(view, newSVsv(*version_sv));
-    av_push(view, newSVsv(*method_sv));
-    av_push(view, newSVsv(*target_sv));
-    av_push(view, newSV(0));
-    av_push(view, newSV(0));
-    av_push(view, newSV(0));
-    av_push(view, newSV(0));
-    av_push(view, newSV(0));
-    av_push(view, newSVsv(*headers_sv));
-    av_push(view, newRV_noinc((SV *)newAV()));
-    av_push(view, newSV(0));
-    view_ref = newRV_noinc((SV *)view);
-
-    cv = ub_http1_uniform_request_cv(aTHX_ context);
-
-    ENTER;
-    SAVETMPS;
-    sv_setsv(ERRSV, &PL_sv_undef);
-    PUSHMARK(SP);
-    XPUSHs(sv_2mortal(view_ref));
-    PUTBACK;
-    count = call_sv((SV *)cv, G_SCALAR | G_EVAL);
-    SPAGAIN;
-    if (SvTRUE(ERRSV)) {
-        error = newSVsv(ERRSV);
-    } else if (count == 1) {
-        request = newSVsv(POPs);
-    } else {
-        error = newSVpvs(
-            "Uniform::HTTP fast-path request constructor returned no request"
-        );
-    }
-    PUTBACK;
-    FREETMPS;
-    LEAVE;
-
-    if (error != NULL) {
-        const char *message = SvPV_nolen(error);
-        croak("%s", message);
-    }
-
-    return request;
 }
 
 static int
@@ -1054,6 +977,9 @@ ub_http1_input_create(pTHX_ SV *engine)
         return NULL;
 
     context->engine = SvREFCNT_inc(engine);
+    context->uniform_native = uhttp_native_init(
+        aTHX_ &context->uniform_api, UHTTP_NATIVE_ABI_VERSION
+    );
     context->role = sv_derived_from(engine, "Unblock::HTTP1::Server") ? 1
         : sv_derived_from(engine, "Unblock::HTTP1::Client") ? 2 : 0;
     context->direct_head = context->role == 1 ? 1 : 0;
@@ -1123,7 +1049,9 @@ ub_http1_input_borrowed(
             data,
             length,
             0,
-            context->max_headers
+            context->max_headers,
+            context->uniform_native ? &context->uniform_api : NULL,
+            &request
         );
 
         if (head == NULL) {
@@ -1299,8 +1227,6 @@ ub_http1_input_destroy(pTHX_ void *opaque)
         SvREFCNT_dec((SV *)context->head_cv);
     if (context->eof_cv != NULL)
         SvREFCNT_dec((SV *)context->eof_cv);
-    if (context->uniform_request_cv != NULL)
-        SvREFCNT_dec((SV *)context->uniform_request_cv);
     if (context->engine != NULL)
         SvREFCNT_dec(context->engine);
     Safefree(context);
@@ -1379,7 +1305,9 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
         buf,
         (size_t)buffer_len,
         (size_t)last_len,
-        (size_t)max_headers
+        (size_t)max_headers,
+        NULL,
+        NULL
     );
     if (RETVAL == NULL)
         XSRETURN_UNDEF;
