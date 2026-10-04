@@ -41,11 +41,12 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$tx) {
+            my ($input, $offset) = $self->_input_window;
             my $head = Unblock::HTTP1::_Native->parse_request_head(
-                $self->{input}, 0, $self->{max_headers},
+                $input, 0, $self->{max_headers}, $offset,
             );
             if (!$head) {
-                if (length($self->{input}) > $self->{max_head_size}) {
+                if ($self->_input_length > $self->{max_head_size}) {
                     $self->_protocol_error(431, 'request head exceeds configured limit');
                 }
                 return;
@@ -58,7 +59,7 @@ sub _drive {
                 $self->_protocol_error(431, 'request head exceeds configured limit');
                 return;
             }
-            substr($self->{input}, 0, $head->{consumed}, '');
+            $self->_input_discard($head->{consumed});
 
             if ($head->{expect_continue} < 0) {
                 $self->_protocol_error(417, 'unsupported Expect field');
@@ -86,7 +87,7 @@ sub _drive {
             my $fixed_ready = !$bodyless
                 && $head->{body_mode} eq 'content-length'
                 && defined($head->{content_length})
-                && length($self->{input}) >= $head->{content_length};
+                && $self->_input_length >= $head->{content_length};
 
             if (!$bodyless && !$fixed_ready) {
                 $self->{rx} = $rx = {
@@ -121,7 +122,7 @@ sub _drive {
             if ($fixed_ready) {
                 my $length = $head->{content_length};
                 if ($length) {
-                    my $bytes = substr($self->{input}, 0, $length, '');
+                    my $bytes = $self->_input_take($length);
                     my $body_cb = $self->_invoke_server(
                         'on_body', $tx, $request, $bytes,
                     );
@@ -139,10 +140,11 @@ sub _drive {
         return unless $rx;
 
         if ($rx->{mode} eq 'content-length') {
-            return unless length $self->{input};
-            my $take = length($self->{input}) < $rx->{remaining}
-                ? length($self->{input}) : $rx->{remaining};
-            my $bytes = substr($self->{input}, 0, $take, '');
+            return unless $self->_input_length;
+            my $available = $self->_input_length;
+            my $take = $available < $rx->{remaining}
+                ? $available : $rx->{remaining};
+            my $bytes = $self->_input_take($take);
             $rx->{remaining} -= $take;
             my $cb = $self->_invoke_server('on_body', $tx, $rx->{request}, $bytes);
             return $self->_application_error($cb) unless $cb eq '1';
@@ -154,17 +156,20 @@ sub _drive {
         }
 
         if ($rx->{mode} eq 'chunked') {
-            return unless length $self->{input};
+            return unless $self->_input_length;
+            my ($input, $offset) = $self->_input_window;
+            my $available = $self->_input_length;
             my ($done, $decoded, $leftover);
             my $ok = eval {
-                ($done, $decoded, $leftover) = $rx->{decoder}->feed($self->{input}, 1);
+                ($done, $decoded, $leftover) =
+                    $rx->{decoder}->feed($input, 1, $offset);
                 1;
             };
             if (!$ok) {
                 $self->_protocol_error(400, "$@");
                 return;
             }
-            $self->{input} = $leftover;
+            $self->_input_discard($available - length($leftover));
             if (defined($decoded) && length($decoded)) {
                 my $cb = $self->_invoke_server('on_body', $tx, $rx->{request}, $decoded);
                 return $self->_application_error($cb) unless $cb eq '1';
@@ -176,11 +181,12 @@ sub _drive {
         }
 
         if ($rx->{mode} eq 'trailers') {
+            my ($input, $offset) = $self->_input_window;
             my $trailers = Unblock::HTTP1::_Native->parse_trailers(
-                $self->{input}, 0, $self->{max_headers},
+                $input, 0, $self->{max_headers}, $offset,
             );
             if (!$trailers) {
-                if (length($self->{input}) > $self->{max_head_size}) {
+                if ($self->_input_length > $self->{max_head_size}) {
                     $self->_protocol_error(431, 'trailer section exceeds configured limit');
                 }
                 return;
@@ -202,7 +208,7 @@ sub _drive {
                 }
                 $rx->{request}->add_trailer(@$field);
             }
-            substr($self->{input}, 0, $trailers->{consumed}, '');
+            $self->_input_discard($trailers->{consumed});
             $self->_finish_request;
             next;
         }
@@ -347,7 +353,7 @@ sub _retire_if_done {
     }
     return if $self->{driving};
     local $self->{driving} = 1;
-    $self->_drive if length $self->{input};
+    $self->_drive if $self->_input_length;
     return;
 }
 
@@ -417,6 +423,11 @@ sub _protocol_error {
         eval { $cb->($self->{active}, $detail || $reason) };
     }
     return;
+}
+
+sub _borrowed_should_buffer_tail {
+    my ($self) = @_;
+    return $self->{active} && !$self->{rx} ? 1 : 0;
 }
 
 sub _on_eof {
