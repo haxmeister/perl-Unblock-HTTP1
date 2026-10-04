@@ -998,6 +998,87 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
   OUTPUT:
     RETVAL
 
+MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedDriver
+
+SV *
+new(CLASS, engine)
+    const char *CLASS
+    SV *engine
+  PREINIT:
+    ub_http1_input_context *context;
+    SV *inner;
+    SV *object;
+  CODE:
+    context = (ub_http1_input_context *)ub_http1_input_create(aTHX_ engine);
+    if (context == NULL)
+        croak("engine does not support Unblock::HTTP1 native input");
+    inner = newSViv(PTR2IV(context));
+    object = newRV_noinc(inner);
+    sv_bless(object, gv_stashpv(CLASS, GV_ADD));
+    RETVAL = object;
+  OUTPUT:
+    RETVAL
+
+void
+feed(self, buffer)
+    SV *self
+    SV *buffer
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+    STRLEN buffer_len;
+    const char *data;
+    size_t consumed = 0;
+    int status;
+  PPCODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    data = SvPVbyte(buffer, buffer_len);
+    status = ub_http1_input_borrowed(
+        aTHX_ context, data, (size_t)buffer_len, &consumed
+    );
+    XPUSHs(sv_2mortal(newSViv(status)));
+    XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
+
+int
+eof(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+  CODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    RETVAL = ub_http1_input_eof(aTHX_ context);
+  OUTPUT:
+    RETVAL
+
+void
+DESTROY(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+  CODE:
+    if (!SvROK(self))
+        XSRETURN_EMPTY;
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        XSRETURN_EMPTY;
+    ub_http1_input_destroy(aTHX_ context);
+    sv_setiv(inner, 0);
+
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedWindow
 
 UV
