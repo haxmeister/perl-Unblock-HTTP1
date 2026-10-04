@@ -63,6 +63,12 @@ The XS backend is intentionally independent of transports and event loops. It
 does not know about file descriptors, readiness APIs, watcher objects, or
 framework-specific native consumer interfaces.
 
+The optional NativeABI exposes the same receive engine to native transports
+through borrowed contiguous input windows. The host retains ownership of the
+window and Unblock reports the consumed prefix. Parser state and HTTP lifecycle
+remain in this distribution; a framework bridge only moves bytes and maps the
+ABI result to its own read/pause/switch behavior.
+
 Portable HTTP parsing and framing optimizations belong here. Transport-specific
 bridges belong in adapters outside the protocol engine.
 
