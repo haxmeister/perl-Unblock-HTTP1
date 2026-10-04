@@ -157,8 +157,9 @@ The remaining work is now primarily performance and integration work:
    implementation;
 3. evaluate the trusted Uniform construction requirements in
    docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change;
-4. define the optional Linux::Event adapter/bridge boundary without
-   making Linux-specific behavior part of the portable Unblock API;
+4. keep the Linux::Event adapter/bridge boundary in
+   docs/LINUX_EVENT_BRIDGE.md without making Linux-specific behavior part of
+   the portable Unblock API;
 5. move additional work into XS only where new same-run benchmarks justify it;
 6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
    existing HTTP/1 suite unchanged where practical.
@@ -167,7 +168,8 @@ The callback/lifecycle profiling pass is complete and does not justify
 weakening callback exception handling or moving finalization methods into XS.
 
 The trusted Uniform construction requirements are documented in
-   docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change.
+docs/TRUSTED_UNIFORM.md. The Linux::Event adapter contract is documented in
+docs/LINUX_EVENT_BRIDGE.md.
 
 The Linux::Event adapter must remain an optimization and transport binding.
 Protocol correctness must continue to be testable entirely in memory here.
