@@ -596,6 +596,12 @@ ssize_t phr_decode_chunked(struct phr_chunked_decoder *decoder, char *buf, size_
                     ret = -1;
                     goto Exit;
                 }
+                ++decoder->_chunk_ext_size;
+                if (decoder->_max_chunk_ext_size != 0 &&
+                    decoder->_chunk_ext_size > decoder->_max_chunk_ext_size) {
+                    ret = -1;
+                    goto Exit;
+                }
             }
             ++src;
             decoder->_state = CHUNKED_IN_CHUNK_HEADER_EXPECT_LF;
@@ -608,6 +614,7 @@ ssize_t phr_decode_chunked(struct phr_chunked_decoder *decoder, char *buf, size_
                 goto Exit;
             }
             ++src;
+            decoder->_chunk_ext_size = 0;
             if (decoder->bytes_left_in_chunk == 0) {
                 if (decoder->consume_trailer) {
                     decoder->_state = CHUNKED_IN_TRAILERS_LINE_HEAD;
