@@ -122,4 +122,18 @@ subtest 'zero chunk extension limit opts out of the extension budget' => sub {
     ok(!$server->is_closed, 'unlimited extension setting remains usable');
 };
 
+
+subtest 'unknown engine options are rejected' => sub {
+    my $ok = eval {
+        Unblock::HTTP1::Server->new(
+            max_chunk_extenson_size => 4,
+            on_request => sub { },
+        );
+        1;
+    };
+    ok(!$ok, 'misspelled engine option is not silently ignored');
+    like($@, qr/unknown option 'max_chunk_extenson_size'/,
+        'unknown option error identifies the typo');
+};
+
 done_testing;
