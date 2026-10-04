@@ -899,11 +899,12 @@ ub_http1_input_borrowed(
 )
 {
     ub_http1_input_context *context = (ub_http1_input_context *)opaque;
-    ub_http1_borrowed_window *window;
-    SV *inner;
-    SV *object;
+    ub_http1_borrowed_window *window = NULL;
+    SV *object = NULL;
     SV *head = NULL;
+    SV *window_arg = &PL_sv_undef;
     int head_ready = 0;
+    int need_window = 1;
     int result;
 
     if (context == NULL || consumed == NULL)
@@ -928,25 +929,46 @@ ub_http1_input_borrowed(
             head = new_error_result(
                 aTHX_ 431, "request head exceeds configured limit"
             );
+            need_window = 0;
+        } else if (SvROK(head) && SvTYPE(SvRV(head)) == SVt_PVHV) {
+            HV *head_hv = (HV *)SvRV(head);
+            SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
+
+            if (ok_sv != NULL && SvTRUE(*ok_sv)) {
+                SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
+                if (consumed_sv != NULL && SvOK(*consumed_sv)) {
+                    UV head_consumed = SvUV(*consumed_sv);
+                    if (head_consumed <= (UV)length
+                        && head_consumed == (UV)length)
+                        need_window = 0;
+                }
+            } else {
+                need_window = 0;
+            }
         }
     }
 
-    Newxz(window, 1, ub_http1_borrowed_window);
-    if (window == NULL) {
-        if (head != NULL)
-            SvREFCNT_dec(head);
-        croak("unable to allocate borrowed input window");
+    if (need_window) {
+        SV *inner;
+
+        Newxz(window, 1, ub_http1_borrowed_window);
+        if (window == NULL) {
+            if (head != NULL)
+                SvREFCNT_dec(head);
+            croak("unable to allocate borrowed input window");
+        }
+
+        window->data = data;
+        window->length = length;
+        window->offset = 0;
+        window->valid = 1;
+
+        inner = newSViv(PTR2IV(window));
+        object = newRV_noinc(inner);
+        sv_bless(object,
+            gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
+        window_arg = object;
     }
-
-    window->data = data;
-    window->length = length;
-    window->offset = 0;
-    window->valid = 1;
-
-    inner = newSViv(PTR2IV(window));
-    object = newRV_noinc(inner);
-    sv_bless(object,
-        gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
 
     {
         int jump_status;
@@ -957,7 +979,7 @@ ub_http1_input_borrowed(
             result = ub_http1_call_engine_input(
                 aTHX_
                 context,
-                object,
+                window_arg,
                 length,
                 head,
                 consumed,
@@ -966,16 +988,20 @@ ub_http1_input_borrowed(
             JMPENV_POP;
         } else {
             JMPENV_POP;
-            window->valid = 0;
-            SvREFCNT_dec(object);
+            if (window != NULL)
+                window->valid = 0;
+            if (object != NULL)
+                SvREFCNT_dec(object);
             if (head != NULL)
                 SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
         }
     }
 
-    window->valid = 0;
-    SvREFCNT_dec(object);
+    if (window != NULL)
+        window->valid = 0;
+    if (object != NULL)
+        SvREFCNT_dec(object);
     if (head != NULL)
         SvREFCNT_dec(head);
 
