@@ -40,3 +40,18 @@ Revision history for Unblock-HTTP1
       values outside the supported framing counter range.
     - Relaxed CONNECT Host validation so the Host port may be omitted while
       still requiring the same destination host.
+    - Hardened serializer method, field, reason-phrase, status, and Connection
+      syntax at the wire boundary, including duck-typed adapter objects.
+    - Accepted higher HTTP/1 minor versions using HTTP/1.1 semantics while
+      preserving the actual received version in Uniform messages.
+    - Corrected HTTP/1.0 Expect and informational-response behavior.
+    - Rejected unsolicited client response bytes both after a final response
+      and while no request is outstanding.
+    - Added general response Transfer-Encoding framing: final chunked framing
+      is removed while earlier transfer codings remain opaque.
+    - Kept strict CRLF requirements for chunk framing with dedicated tests.
+    - Allowed legal empty Host port subcomponents while rejecting empty HTTP
+      absolute-form hosts.
+    - Kept informational responses on the dedicated send_informational() API.
+    - Allowed Content-Length: 0 on CONNECT requests while still rejecting
+      request content and Transfer-Encoding.
