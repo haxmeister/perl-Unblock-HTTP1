@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/http1-parity
+      - main
     paths:
       - 'bench/compare-linux-event.pl'
+      - 'lib/Unblock/HTTP1.pm'
+      - 'lib/Unblock/HTTP1/**'
+      - 'HTTP1.xs'
+      - 'vendor/picohttpparser/**'
       - '.github/workflows/benchmark-linux-event.yml'
 
 jobs:
