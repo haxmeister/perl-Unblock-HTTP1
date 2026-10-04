@@ -98,6 +98,11 @@ subtest 'Host and persistence rules' => sub {
     );
     ok($ipv6->{ok}, 'bracketed IPv6 Host is accepted');
 
+    my $empty_port = parse(
+        "GET / HTTP/1.1\r\nHost: example.test:\r\n\r\n"
+    );
+    ok($empty_port->{ok}, 'Host with explicit empty port is accepted');
+
     my $close = parse(
         "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n"
     );
