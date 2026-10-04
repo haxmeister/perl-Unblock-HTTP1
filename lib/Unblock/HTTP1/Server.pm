@@ -46,7 +46,7 @@ sub _input_native_head {
         if $self->{active} || $self->{rx};
 
     local $self->{borrowed_head} = $head;
-    local $self->{borrowed_request} = $request;
+    local $self->{borrowed_message} = $request;
     local $self->{native_head_preconsumed} = 1;
     local $self->{driving} = 1;
     $self->_drive;
@@ -64,7 +64,7 @@ sub _drive {
         if (!$tx) {
             return unless $self->{borrowed_head} || $self->_input_length;
             my $head = delete $self->{borrowed_head};
-            my $request = delete $self->{borrowed_request};
+            my $request = delete $self->{borrowed_message};
             if (!$head) {
                 my ($input, $offset) = $self->_input_window;
                 $head = Unblock::HTTP1::_Native->parse_request_head(
