@@ -157,7 +157,7 @@ sub _upgrade_tokens {
 
 sub _validate_connect_request {
     my ($request, $fields, $version, $body, $stream_body, $trailers) = @_;
-    return unless uc($request->method) eq 'CONNECT';
+    return unless $request->method eq 'CONNECT';
 
     croak 'CONNECT requires HTTP/1.1' unless $version eq '1.1';
     croak 'CONNECT cannot use a streaming request body' if $stream_body;
@@ -276,7 +276,7 @@ sub _simple_request_plan {
     return unless $version eq '1.1';
 
     my $method = _bytes('request method', $request->method);
-    return if uc($method) eq 'CONNECT';
+    return if $method eq 'CONNECT';
 
     if ($request->can('protocol')) {
         return if defined $request->protocol;
@@ -356,7 +356,7 @@ sub _simple_response_plan {
     return unless $request_version eq '1.1';
 
     my $method = _bytes('request method', $request->method);
-    return if uc($method) eq 'HEAD' || uc($method) eq 'CONNECT';
+    return if $method eq 'HEAD' || $method eq 'CONNECT';
 
     # Any explicit connection option can change persistence semantics.
     my $request_connection = $request->header_values('Connection');
@@ -525,7 +525,7 @@ sub response_receive_plan {
     my $status = $head->{status};
     my $method = $request->method;
 
-    if (uc($method) eq 'CONNECT' && $status >= 200 && $status < 300) {
+    if ($method eq 'CONNECT' && $status >= 200 && $status < 300) {
         croak 'HTTP/1 CONNECT successful response must use HTTP/1.1'
             unless $head->{version} eq '1.1';
         return {
@@ -559,7 +559,7 @@ sub response_receive_plan {
     # HEAD and 304 never carry HTTP content. Content-Length and
     # Transfer-Encoding, when present, describe the corresponding selected
     # representation rather than framing bytes on this message.
-    if (uc($method) eq 'HEAD' || $status == 304) {
+    if ($method eq 'HEAD' || $status == 304) {
         return {
             mode       => 'none',
             remaining  => undef,
@@ -635,7 +635,7 @@ sub response_plan {
         if $stream_body && defined $body;
 
     my $method = $request->method;
-    my $connect_switch = uc($method) eq 'CONNECT'
+    my $connect_switch = $method eq 'CONNECT'
         && $status >= 200 && $status < 300 ? 1 : 0;
     my $upgrade_switch = $status == 101 ? 1 : 0;
     my $switch = $connect_switch || $upgrade_switch ? 1 : 0;
