@@ -282,7 +282,9 @@ sub _simple_request_plan {
         return if defined $request->protocol;
     }
 
-    return if $request->has_buffered_body;
+    my $body = $request->has_buffered_body
+        ? _bytes('request body', $request->body)
+        : undef;
 
     my $trailer_count = $request->trailer_count;
     return unless defined($trailer_count) && $trailer_count == 0;
@@ -321,13 +323,23 @@ sub _simple_request_plan {
         $wire .= 'Host: ' . _bytes('request authority', $authority) . "\r\n";
     }
 
+    my $mode = 'none';
+    my $remaining;
+    if (defined $body) {
+        my $length = length($body);
+        $wire .= 'Content-Length: ' . $length . "\r\n";
+        $mode = 'content-length';
+        $remaining = 0;
+    }
+
     $wire .= "\r\n";
+    $wire .= $body if defined $body;
 
     return {
         wire           => $wire,
         version        => '1.1',
-        mode           => 'none',
-        remaining      => undef,
+        mode           => $mode,
+        remaining      => $remaining,
         stream_body    => 0,
         trailers       => [],
         keep_alive     => 1,
