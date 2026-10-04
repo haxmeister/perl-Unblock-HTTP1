@@ -1111,6 +1111,39 @@ feed(self, buffer)
     XPUSHs(sv_2mortal(newSViv(status)));
     XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
 
+UV
+feed_repeat(self, buffer, count)
+    SV *self
+    SV *buffer
+    UV count
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+    STRLEN buffer_len;
+    const char *data;
+    UV i;
+  CODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    data = SvPVbyte(buffer, buffer_len);
+    for (i = 0; i < count; ++i) {
+        size_t consumed = 0;
+        int status = ub_http1_input_borrowed(
+            aTHX_ context, data, (size_t)buffer_len, &consumed
+        );
+        if (status != UB_HTTP1_INPUT_OK
+            || consumed != (size_t)buffer_len)
+            croak("borrowed repeat input did not consume complete window");
+    }
+    RETVAL = count;
+  OUTPUT:
+    RETVAL
+
 int
 eof(self)
     SV *self
