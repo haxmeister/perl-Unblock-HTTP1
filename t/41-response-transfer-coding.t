@@ -16,6 +16,19 @@ sub request {
     );
 }
 
+sub request_accepting {
+    my ($coding) = @_;
+    return Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => '/',
+        headers => [
+            [ Host => 'example.test' ],
+            [ Connection => 'TE' ],
+            [ TE => $coding ],
+        ],
+    );
+}
+
 subtest 'response with transfer coding before final chunked is framed by chunked' => sub {
     my $body = '';
     my $error;
