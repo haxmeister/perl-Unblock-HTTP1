@@ -80,6 +80,24 @@ sub _response_from_validated_head {
     ]);
 }
 
+sub _fast_request_view {
+    my ($request) = @_;
+    return unless Uniform::HTTP::FastPath::can_view($request);
+    my $view = Uniform::HTTP::FastPath::view($request);
+    return unless $view->[Uniform::HTTP::FastPath::SLOT_KIND()]
+        == Uniform::HTTP::FastPath::KIND_REQUEST();
+    return $view;
+}
+
+sub _fast_response_view {
+    my ($response) = @_;
+    return unless Uniform::HTTP::FastPath::can_view($response);
+    my $view = Uniform::HTTP::FastPath::view($response);
+    return unless $view->[Uniform::HTTP::FastPath::SLOT_KIND()]
+        == Uniform::HTTP::FastPath::KIND_RESPONSE();
+    return $view;
+}
+
 my %REASON = (
     100 => 'Continue', 101 => 'Switching Protocols', 103 => 'Early Hints',
     200 => 'OK', 201 => 'Created', 202 => 'Accepted', 204 => 'No Content',
@@ -156,7 +174,15 @@ sub _lc {
 }
 
 sub _fields {
-    my ($message, $section) = @_;
+    my ($message, $section, $view) = @_;
+
+    if ($view) {
+        my $slot = $section eq 'trailer'
+            ? Uniform::HTTP::FastPath::SLOT_TRAILERS()
+            : Uniform::HTTP::FastPath::SLOT_HEADERS();
+        return $view->[$slot];
+    }
+
     my $count_method = $section eq 'trailer' ? 'trailer_count' : 'header_count';
     my $name_method  = $section eq 'trailer' ? 'trailer_name' : 'header_name';
     my $value_method = $section eq 'trailer' ? 'trailer_value' : 'header_value';
@@ -621,8 +647,11 @@ sub _upgrade_tokens {
 }
 
 sub _validate_connect_request {
-    my ($request, $fields, $version, $body, $stream_body, $trailers) = @_;
-    return unless $request->method eq 'CONNECT';
+    my ($request, $fields, $version, $body, $stream_body, $trailers, $view) = @_;
+    my $method = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : $request->method;
+    return unless $method eq 'CONNECT';
 
     croak 'CONNECT requires HTTP/1.1 semantics'
         unless _semantics_version($version) eq '1.1';
@@ -635,7 +664,10 @@ sub _validate_connect_request {
     croak 'CONNECT request must not contain Transfer-Encoding'
         if @{ _values($fields, 'Transfer-Encoding') };
 
-    my ($target_host, $target_port) = _authority_form($request->target);
+    my $target = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_TARGET()]
+        : $request->target;
+    my ($target_host, $target_port) = _authority_form($target);
     my $host = _values($fields, 'Host');
     croak 'CONNECT requires exactly one Host field' unless @$host == 1;
 
@@ -647,7 +679,7 @@ sub _validate_connect_request {
 }
 
 sub _validate_upgrade_request {
-    my ($request, $fields, $version) = @_;
+    my ($request, $fields, $version, $view) = @_;
     croak 'HTTP/1 Upgrade requires HTTP/1.1 semantics'
         unless _semantics_version($version) eq '1.1';
 
@@ -665,19 +697,32 @@ sub _validate_upgrade_request {
         if defined($cl) && $cl != 0;
     croak 'HTTP/1 Upgrade request cannot use Transfer-Encoding'
         if @{ _values($fields, 'Transfer-Encoding') };
+
+    my ($has_body, $body);
+    if ($view) {
+        $has_body =
+            $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()]
+            & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY() ? 1 : 0;
+        $body = $view->[Uniform::HTTP::FastPath::SLOT_BODY()] if $has_body;
+    } else {
+        $has_body = $request->has_buffered_body;
+        $body = $request->body if $has_body;
+    }
     croak 'HTTP/1 Upgrade request body must be empty'
-        if $request->has_buffered_body
-            && defined($request->body) && length($request->body);
+        if $has_body && defined($body) && length($body);
     return $offered;
 }
 
 sub _validate_upgrade_response {
-    my ($request, $request_fields, $response_fields, $response_version) = @_;
+    my ($request, $request_fields, $response_fields, $response_version, $request_view) = @_;
     croak 'HTTP/1 Upgrade response must use HTTP/1.1 semantics'
         unless _semantics_version($response_version) eq '1.1';
 
+    my $request_version = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $request->version;
     my $offered = _validate_upgrade_request(
-        $request, $request_fields, $request->version || '1.1',
+        $request, $request_fields, $request_version || '1.1', $request_view,
     );
 
     croak 'HTTP/1 Upgrade response cannot contain Content-Length'
@@ -821,66 +866,108 @@ sub _version {
 }
 
 sub _simple_request_plan {
-    my ($request, $stream_body) = @_;
+    my ($request, $stream_body, $view) = @_;
     return if $stream_body;
 
-    my $version = $request->version;
+    my $version = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $request->version;
     $version = '1.1' unless defined $version;
     return unless $version eq '1.1';
 
-    my $method = _method($request->method);
+    my $method = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : _method($request->method);
     return if $method eq 'CONNECT';
 
-    if ($request->can('protocol')) {
+    if ($view) {
+        return if defined $view->[Uniform::HTTP::FastPath::SLOT_PROTOCOL()];
+    } elsif ($request->can('protocol')) {
         return if defined $request->protocol;
     }
 
-    my $body = $request->has_buffered_body
-        ? _bytes('request body', $request->body)
-        : undef;
+    my $body;
+    if ($view) {
+        if ($view->[Uniform::HTTP::FastPath::SLOT_FLAGS()]
+            & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()) {
+            $body = $view->[Uniform::HTTP::FastPath::SLOT_BODY()];
+        }
+    } else {
+        $body = $request->has_buffered_body
+            ? _bytes('request body', $request->body)
+            : undef;
+    }
 
-    my $trailer_count = $request->trailer_count;
+    my $trailer_count = $view
+        ? scalar @{ $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()] }
+        : $request->trailer_count;
     return unless defined($trailer_count) && $trailer_count == 0;
 
-    my $target = _bytes('request target', $request->target);
+    my $target = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_TARGET()]
+        : _bytes('request target', $request->target);
     _validate_request_target($method, $target);
     my ($absolute_form) = _absolute_form_host($method, $target);
     return if $absolute_form;
-    my $count = $request->header_count;
-    return unless defined $count;
 
     my $wire = $method . ' ' . $target . " HTTP/1.1\r\n";
     my $host_count = 0;
 
-    for my $index (0 .. $count - 1) {
-        my $name = _field_name('header', $request->header_name($index));
-        my $value = _field_value('header', $request->header_value($index));
-        my $key = _lc($name);
+    if ($view) {
+        for my $field (@{ $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()] }) {
+            my ($name, $value) = @$field;
+            my $key = _lc($name);
 
-        if ($key eq 'host') {
-            ++$host_count;
-            _validate_host_value($value);
+            if ($key eq 'host') {
+                ++$host_count;
+                _validate_host_value($value);
+            }
+
+            return if $key eq 'content-length'
+                || $key eq 'transfer-encoding'
+                || $key eq 'connection'
+                || $key eq 'upgrade'
+                || $key eq 'expect'
+                || $key eq 'te';
+
+            $wire .= $name . ': ' . $value . "\r\n";
         }
+    } else {
+        my $count = $request->header_count;
+        return unless defined $count;
+        for my $index (0 .. $count - 1) {
+            my $name = _field_name('header', $request->header_name($index));
+            my $value = _field_value('header', $request->header_value($index));
+            my $key = _lc($name);
 
-        # These fields alter framing, persistence, switching, expectation, or
-        # request validation. Let the complete planner own those paths.
-        return if $key eq 'content-length'
-            || $key eq 'transfer-encoding'
-            || $key eq 'connection'
-            || $key eq 'upgrade'
-            || $key eq 'expect'
-            || $key eq 'te';
+            if ($key eq 'host') {
+                ++$host_count;
+                _validate_host_value($value);
+            }
 
-        $wire .= $name . ': ' . $value . "\r\n";
+            return if $key eq 'content-length'
+                || $key eq 'transfer-encoding'
+                || $key eq 'connection'
+                || $key eq 'upgrade'
+                || $key eq 'expect'
+                || $key eq 'te';
+
+            $wire .= $name . ': ' . $value . "\r\n";
+        }
     }
 
     return if $host_count > 1;
 
     if (!$host_count) {
-        return unless $request->can('authority');
-        my $authority = $request->authority;
+        my $authority;
+        if ($view) {
+            $authority = $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()];
+        } else {
+            return unless $request->can('authority');
+            $authority = $request->authority;
+        }
         return unless defined $authority;
-        $authority = _bytes('request authority', $authority);
+        $authority = _bytes('request authority', $authority) unless $view;
         _validate_host_value($authority);
         $wire .= 'Host: ' . $authority . "\r\n";
     }
@@ -910,59 +997,90 @@ sub _simple_request_plan {
 }
 
 sub _simple_response_plan {
-    my ($request, $response, $stream_body) = @_;
+    my ($request, $response, $stream_body, $request_view, $response_view) = @_;
     return if $stream_body;
 
-    my $request_version = $request->version;
+    my $request_version = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $request->version;
     $request_version = '1.1' unless defined $request_version;
     return unless $request_version eq '1.1';
 
-    my $method = _method($request->method);
+    my $method = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : _method($request->method);
     return if $method eq 'HEAD' || $method eq 'CONNECT';
 
-    # Any explicit connection option can change persistence semantics.
-    my $request_connection = $request->header_values('Connection');
+    my $request_connection = $request_view
+        ? _values($request_view->[Uniform::HTTP::FastPath::SLOT_HEADERS()], 'Connection')
+        : $request->header_values('Connection');
     return unless defined($request_connection) && !@$request_connection;
 
-    my $response_version = $response->version;
+    my $response_version = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $response->version;
     return if defined($response_version) && $response_version ne '1.1';
 
-    my $status = _status_code($response->status);
+    my $status = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_STATUS()]
+        : _status_code($response->status);
     return if $status < 200 || $status > 599
         || $status == 204 || $status == 205 || $status == 304;
 
-    my $trailer_count = $response->trailer_count;
+    my $trailer_count = $response_view
+        ? scalar @{ $response_view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()] }
+        : $response->trailer_count;
     return unless defined($trailer_count) && $trailer_count == 0;
 
     my $body;
-    if ($response->has_buffered_body) {
+    if ($response_view) {
+        if ($response_view->[Uniform::HTTP::FastPath::SLOT_FLAGS()]
+            & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()) {
+            $body = $response_view->[Uniform::HTTP::FastPath::SLOT_BODY()];
+        } else {
+            $body = '';
+        }
+    } elsif ($response->has_buffered_body) {
         $body = _bytes('response body', $response->body);
     } else {
         $body = '';
     }
 
-    my $reason_value = $response->reason;
+    my $reason_value = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_REASON()]
+        : $response->reason;
     my $reason = defined($reason_value)
-        ? _reason_phrase($reason_value)
+        ? ($response_view ? $reason_value : _reason_phrase($reason_value))
         : ($REASON{$status} || '');
-
-    my $count = $response->header_count;
-    return unless defined $count;
 
     my $wire = 'HTTP/1.1 ' . sprintf('%03d', $status)
         . ' ' . $reason . "\r\n";
 
-    for my $index (0 .. $count - 1) {
-        my $name = _field_name('header', $response->header_name($index));
-        my $value = _field_value('header', $response->header_value($index));
-        my $key = _lc($name);
+    if ($response_view) {
+        for my $field (@{ $response_view->[Uniform::HTTP::FastPath::SLOT_HEADERS()] }) {
+            my ($name, $value) = @$field;
+            my $key = _lc($name);
 
-        # Explicit framing or persistence belongs to the complete planner.
-        return if $key eq 'content-length'
-            || $key eq 'transfer-encoding'
-            || $key eq 'connection';
+            return if $key eq 'content-length'
+                || $key eq 'transfer-encoding'
+                || $key eq 'connection';
 
-        $wire .= $name . ': ' . $value . "\r\n";
+            $wire .= $name . ': ' . $value . "\r\n";
+        }
+    } else {
+        my $count = $response->header_count;
+        return unless defined $count;
+        for my $index (0 .. $count - 1) {
+            my $name = _field_name('header', $response->header_name($index));
+            my $value = _field_value('header', $response->header_value($index));
+            my $key = _lc($name);
+
+            return if $key eq 'content-length'
+                || $key eq 'transfer-encoding'
+                || $key eq 'connection';
+
+            $wire .= $name . ': ' . $value . "\r\n";
+        }
     }
 
     my $length = length($body);
@@ -984,23 +1102,50 @@ sub _simple_response_plan {
 
 sub request_plan {
     my ($request, %option) = @_;
+    my $view = _fast_request_view($request);
     croak 'request does not implement the Uniform HTTP request contract'
-        unless ref($request) && $request->can('method') && $request->can('target')
-            && $request->can('header_count') && $request->can('has_buffered_body');
+        unless $view
+            || (ref($request) && $request->can('method') && $request->can('target')
+                && $request->can('header_count') && $request->can('has_buffered_body'));
+
+    my $protocol = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_PROTOCOL()]
+        : ($request->can('protocol') ? $request->protocol : undef);
     croak 'HTTP/1 cannot directly encode Uniform Extended CONNECT protocol metadata'
-        if $request->can('protocol') && defined $request->protocol;
+        if defined $protocol;
 
     my $stream_body = $option{stream_body} ? 1 : 0;
-    if (my $simple = _simple_request_plan($request, $stream_body)) {
+    if (my $simple = _simple_request_plan($request, $stream_body, $view)) {
         return $simple;
     }
 
-    my $version = _version($request, '1.1');
-    my $method = _method($request->method);
-    my $target = _bytes('request target', $request->target);
+    my $version = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $request->version;
+    $version = '1.1' unless defined $version;
+    croak 'HTTP/1 version must be 1.0 or 1.1'
+        unless $version eq '1.0' || $version eq '1.1';
+
+    my $method = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : _method($request->method);
+    my $target = $view
+        ? $view->[Uniform::HTTP::FastPath::SLOT_TARGET()]
+        : _bytes('request target', $request->target);
     _validate_request_target($method, $target);
-    my $fields = _fields($request, 'header');
-    my $body = $request->has_buffered_body ? _bytes('request body', $request->body) : undef;
+
+    my $fields = _fields($request, 'header', $view);
+    my $body;
+    if ($view) {
+        if ($view->[Uniform::HTTP::FastPath::SLOT_FLAGS()]
+            & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()) {
+            $body = $view->[Uniform::HTTP::FastPath::SLOT_BODY()];
+        }
+    } else {
+        $body = $request->has_buffered_body
+            ? _bytes('request body', $request->body)
+            : undef;
+    }
     croak 'stream_body cannot be combined with a buffered request body'
         if $stream_body && defined $body;
 
@@ -1017,10 +1162,15 @@ sub request_plan {
             $host = [ $absolute_host ];
         }
     } elsif (!@$host && $version eq '1.1') {
-        my $authority = $request->can('authority') ? $request->authority : undef;
+        my $authority = $view
+            ? $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()]
+            : ($request->can('authority') ? $request->authority : undef);
         croak 'HTTP/1.1 request requires Host or Uniform authority metadata'
             unless defined $authority;
-        $fields = [ @$fields, [ 'Host', _bytes('request authority', $authority) ] ];
+        $fields = [ @$fields, [
+            'Host',
+            $view ? $authority : _bytes('request authority', $authority),
+        ] ];
     }
 
     _validate_host_value($_) for @{ _values($fields, 'Host') };
@@ -1039,13 +1189,13 @@ sub request_plan {
     croak 'request cannot contain both Transfer-Encoding and Content-Length'
         if @$te && defined $cl;
 
-    my $trailers = _fields($request, 'trailer');
+    my $trailers = _fields($request, 'trailer', $view);
     my $has_trailers = @$trailers ? 1 : 0;
     $fields = _ensure_trailer_header($fields, $trailers)
         if $has_trailers;
 
     _validate_connect_request(
-        $request, $fields, $version, $body, $stream_body, $trailers,
+        $request, $fields, $version, $body, $stream_body, $trailers, $view,
     );
 
     my ($mode, $remaining);
@@ -1107,9 +1257,12 @@ sub request_plan {
 
 sub response_receive_plan {
     my ($request, $head) = @_;
+    my $request_view = _fast_request_view($request);
     my $fields = $head->{headers};
     my $status = $head->{status};
-    my $method = $request->method;
+    my $method = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : $request->method;
 
     if ($method eq 'CONNECT' && $status >= 200 && $status < 300) {
         croak 'HTTP/1 CONNECT successful response must use HTTP/1.1 semantics'
@@ -1125,9 +1278,10 @@ sub response_receive_plan {
     if ($status == 101) {
         _validate_upgrade_response(
             $request,
-            _fields($request, 'header'),
+            _fields($request, 'header', $request_view),
             $fields,
             $head->{version},
+            $request_view,
         );
         return {
             mode       => 'none',
@@ -1147,10 +1301,6 @@ sub response_receive_plan {
     croak 'HTTP/1.0 response must not contain Transfer-Encoding'
         if $response_semantics eq '1.0' && @$raw_te;
 
-    # HEAD and 304 never carry HTTP content. Content-Length and
-    # Transfer-Encoding, when present, describe the corresponding selected
-    # representation rather than framing bytes on this message. The framing
-    # algorithm terminates these responses at the header boundary.
     if ($method eq 'HEAD' || $status == 304) {
         return {
             mode       => 'none',
@@ -1201,33 +1351,67 @@ sub response_receive_plan {
 
 sub response_plan {
     my ($request, $response, %option) = @_;
+    my $request_view = _fast_request_view($request);
+    my $response_view = _fast_response_view($response);
+
     croak 'response does not implement the Uniform HTTP response contract'
-        unless ref($response) && $response->can('status')
-            && $response->can('header_count') && $response->can('has_buffered_body');
+        unless $response_view
+            || (ref($response) && $response->can('status')
+                && $response->can('header_count')
+                && $response->can('has_buffered_body'));
 
     my $stream_body = $option{stream_body} ? 1 : 0;
-    if (my $simple = _simple_response_plan($request, $response, $stream_body)) {
+    if (my $simple = _simple_response_plan(
+        $request, $response, $stream_body, $request_view, $response_view,
+    )) {
         return $simple;
     }
 
-    my $received_request_version = $request->version || '1.1';
+    my $received_request_version = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $request->version;
+    $received_request_version ||= '1.1';
     my $request_version = _semantics_version($received_request_version);
-    if (defined $response->version && $response->version ne $request_version) {
+
+    my $response_version = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $response->version;
+    if (defined $response_version && $response_version ne $request_version) {
         croak 'response version conflicts with supported HTTP/1 response semantics';
     }
 
-    my $status = _status_code($response->status);
-    my $reason = defined($response->reason) ? _reason_phrase($response->reason)
+    my $status = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_STATUS()]
+        : _status_code($response->status);
+    my $reason_value = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_REASON()]
+        : $response->reason;
+    my $reason = defined($reason_value)
+        ? ($response_view ? $reason_value : _reason_phrase($reason_value))
         : ($REASON{$status} || '');
-    my $fields = _fields($response, 'header');
-    my $trailers = _fields($response, 'trailer');
+
+    my $fields = _fields($response, 'header', $response_view);
+    my $trailers = _fields($response, 'trailer', $response_view);
     $fields = _ensure_trailer_header($fields, $trailers)
         if @$trailers;
-    my $body = $response->has_buffered_body ? _bytes('response body', $response->body) : undef;
+
+    my $body;
+    if ($response_view) {
+        if ($response_view->[Uniform::HTTP::FastPath::SLOT_FLAGS()]
+            & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()) {
+            $body = $response_view->[Uniform::HTTP::FastPath::SLOT_BODY()];
+        }
+    } else {
+        $body = $response->has_buffered_body
+            ? _bytes('response body', $response->body)
+            : undef;
+    }
     croak 'stream_body cannot be combined with a buffered response body'
         if $stream_body && defined $body;
 
-    my $method = $request->method;
+    my $method = $request_view
+        ? $request_view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
+        : $request->method;
     my $connect_switch = $method eq 'CONNECT'
         && $status >= 200 && $status < 300 ? 1 : 0;
     my $upgrade_switch = $status == 101 ? 1 : 0;
@@ -1239,11 +1423,12 @@ sub response_plan {
     if ($connect_switch) {
         _validate_connect_request(
             $request,
-            _fields($request, 'header'),
+            _fields($request, 'header', $request_view),
             $request_version,
             undef,
             0,
             [],
+            $request_view,
         );
         croak 'successful CONNECT response must not contain a buffered body'
             if defined $body;
@@ -1272,7 +1457,7 @@ sub response_plan {
         if !$connect_switch && @$te && defined $cl;
 
     if (grep { $_ ne 'chunked' } @$te) {
-        my $request_fields = _fields($request, 'header');
+        my $request_fields = _fields($request, 'header', $request_view);
         my $request_connection = _connection_tokens($request_fields);
         my $preferences = _request_te_preferences($request_fields);
 
@@ -1303,9 +1488,10 @@ sub response_plan {
         }
         _validate_upgrade_response(
             $request,
-            _fields($request, 'header'),
+            _fields($request, 'header', $request_view),
             $fields,
             $request_version,
+            $request_view,
         );
     }
 
@@ -1371,16 +1557,19 @@ sub response_plan {
         $remaining = $length;
     }
 
-    my $request_tokens = _connection_tokens(_fields($request, 'header'));
+    my $request_tokens =
+        _connection_tokens(_fields($request, 'header', $request_view));
     my $response_tokens = _connection_tokens($fields);
     my $request_keep = $request_tokens->{close} ? 0
         : $request_version eq '1.1' ? 1
         : $request_tokens->{'keep-alive'} ? 1 : 0;
-    my $keep_alive = $request_keep && !$response_tokens->{close} && !$close_after && !$switch;
+    my $keep_alive =
+        $request_keep && !$response_tokens->{close} && !$close_after && !$switch;
     if (!$keep_alive && !$switch && $request_version eq '1.1'
         && !$response_tokens->{close}) {
         $fields = [ @$fields, [ 'Connection', 'close' ] ];
-    } elsif ($keep_alive && $request_version eq '1.0' && !$response_tokens->{'keep-alive'}) {
+    } elsif ($keep_alive && $request_version eq '1.0'
+        && !$response_tokens->{'keep-alive'}) {
         $fields = [ @$fields, [ 'Connection', 'keep-alive' ] ];
     }
 
@@ -1392,7 +1581,8 @@ sub response_plan {
             ? chunk($body) . final_chunk($trailers)
             : $body;
         $remaining = 0 if defined $remaining;
-    } elsif (!$head_only && !$body_forbidden && !$stream_body && $mode eq 'chunked') {
+    } elsif (!$head_only && !$body_forbidden && !$stream_body
+        && $mode eq 'chunked') {
         $wire .= final_chunk($trailers);
     }
 
@@ -1407,9 +1597,9 @@ sub response_plan {
         close_after    => $close_after,
         switch         => $switch,
         body_finalized => $stream_body ? 0 : 1,
+        forbid_content => $metadata_only_framing ? 1 : 0,
     };
 }
-
 sub chunk {
     my ($bytes) = @_;
     $bytes = _bytes('body chunk', $bytes);
