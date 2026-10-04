@@ -82,20 +82,14 @@ sub _response_from_validated_head {
 
 sub _fast_request_view {
     my ($request) = @_;
-    return unless Uniform::HTTP::FastPath::can_view($request);
-    my $view = Uniform::HTTP::FastPath::view($request);
-    return unless $view->[Uniform::HTTP::FastPath::SLOT_KIND()]
-        == Uniform::HTTP::FastPath::KIND_REQUEST();
-    return $view;
+    return unless ref($request) eq 'Uniform::HTTP::Request';
+    return Uniform::HTTP::FastPath::view($request);
 }
 
 sub _fast_response_view {
     my ($response) = @_;
-    return unless Uniform::HTTP::FastPath::can_view($response);
-    my $view = Uniform::HTTP::FastPath::view($response);
-    return unless $view->[Uniform::HTTP::FastPath::SLOT_KIND()]
-        == Uniform::HTTP::FastPath::KIND_RESPONSE();
-    return $view;
+    return unless ref($response) eq 'Uniform::HTTP::Response';
+    return Uniform::HTTP::FastPath::view($response);
 }
 
 my %REASON = (
