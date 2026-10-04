@@ -1088,7 +1088,7 @@ ub_http1_call_engine_head(
 }
 
 static int
-ub_http1_input_can_direct_head(ub_http1_input_context *context)
+ub_http1_input_can_direct_head(pTHX_ ub_http1_input_context *context)
 {
     HV *engine_hv;
     SV **value;
@@ -1161,7 +1161,7 @@ ub_http1_input_create(pTHX_ SV *engine)
 
     }
 
-    context->direct_head = ub_http1_input_can_direct_head(context);
+    context->direct_head = ub_http1_input_can_direct_head(aTHX_ context);
     return context;
 }
 
@@ -1192,7 +1192,7 @@ ub_http1_input_borrowed(
     if (data == NULL)
         data = "";
 
-    context->direct_head = ub_http1_input_can_direct_head(context);
+    context->direct_head = ub_http1_input_can_direct_head(aTHX_ context);
 
     if (context->direct_head && context->role == 1) {
         head = ub_http1_parse_request_head_result(
