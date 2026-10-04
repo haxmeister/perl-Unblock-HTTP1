@@ -114,7 +114,29 @@ The portable engine now has:
 - cross-platform CI on Linux, macOS, and Windows, including Perl 5.16;
 - dedicated lifecycle and callback reentrancy regressions;
 - standalone benchmarks for parsing and serialization;
-- complete small GET, fixed-length body, and chunked streaming exchanges.
+- complete small GET, fixed-length body, and chunked streaming exchanges;
+- persistent-connection, client-only, and server-only lifecycle benchmarks;
+- focused regressions proving coalesced fixed-length fast paths preserve the
+  same message lifecycle and bytes as fragmented input.
+
+## Performance findings
+
+Current standalone measurements show:
+
+- native request and response parsing is already much faster than complete
+  transaction processing and is not the primary portable bottleneck;
+- Transaction allocation is inexpensive relative to message construction and
+  protocol lifecycle work;
+- ordinary buffered HTTP/1.1 request and response planners are about four times
+  faster than their full validation-path controls in same-run CI measurements;
+- response receive framing analysis is small enough that moving it to XS is not
+  currently justified;
+- connection object reuse changes standalone throughput much less than the
+  per-message lifecycle, so optimization should remain focused on transaction
+  work rather than engine construction.
+
+Absolute benchmark rates vary with the CI runner. Same-run ratios are the
+useful development signal.
 
 ## Remaining before Linux::Event integration
 
@@ -123,10 +145,9 @@ The remaining work is now primarily performance and integration work:
 1. keep the cross-platform parity matrix green while optimization continues;
 2. compare the hot paths against the current Linux::Event::HTTP native HTTP/1
    implementation;
-3. profile message construction, serialization planning, and state transitions
-   identified by those comparisons;
-4. move additional serialization/state work into XS only where benchmarks
-   justify it;
+3. profile Uniform message construction, callback dispatch, and remaining
+   state transitions identified by those comparisons;
+4. move additional work into XS only where same-run benchmarks justify it;
 5. define the optional Linux::Event native Stream-consumer bridge without
    making it part of the portable Unblock API;
 6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its

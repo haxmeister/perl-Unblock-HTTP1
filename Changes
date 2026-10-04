@@ -19,3 +19,8 @@ Revision history for Unblock-HTTP1
     - Standalone parse, serialization, fixed-body, chunked-body, and loopback
       benchmarks for optimization work.
     - Fast paths for common HTTP/1.1 request and response serialization plans.
+    - Buffered HTTP/1.1 planning fast paths benchmark at roughly four times the
+      full validation-path controls in same-run development measurements.
+    - Bodyless and fully buffered fixed-length receive fast paths avoid
+      unnecessary receive-state allocation while preserving callback lifecycle.
+    - Focused fast-path regressions compare coalesced and fragmented body input.
