@@ -90,7 +90,7 @@ subtest 'client rejects malformed CONNECT requests before wire output' => sub {
                 target => 'example.test:443',
                 headers => [ [ Host => 'other.test:443' ] ],
             ),
-            qr/Host must match/,
+            qr/Host must (?:match|identify)/,
         ],
         [
             'body',
