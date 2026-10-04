@@ -71,5 +71,6 @@ framework-specific stream object.
 
 Unblock::HTTP1 itself uses the Uniform::HTTP 0.06 native FastPath internally on
 this route. Validated parser spans are copied directly into the final canonical
-Uniform request object. The adapter does not need to know about Uniform's native
-ABI and must not retain or manage any of those object-construction details.
+Uniform request or response object. The adapter does not need to know about
+Uniform's native ABI and must not retain or manage any of those
+object-construction details.
