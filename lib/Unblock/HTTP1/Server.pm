@@ -85,6 +85,12 @@ sub _drive {
                 $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
             }
 
+            if ($head->{expect_continue} > 0
+                && ($rx->{mode} eq 'chunked'
+                    || ($rx->{mode} eq 'content-length' && $rx->{remaining}))) {
+                $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
+            }
+
             my $cb = $self->_invoke_server('on_request', $tx, $request);
             return $self->_application_error($cb) unless $cb eq '1';
             return if $self->{switched} || $self->{closed};
