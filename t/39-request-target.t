@@ -227,6 +227,19 @@ subtest 'outgoing request target uses the same form rules' => sub {
     like($@, qr/requires an authority/,
         'missing authority error is explicit');
 
+    my $bad_host = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => '/',
+        headers => [ [ Host => 'bad host' ] ],
+    );
+    my $bad_host_ok = eval {
+        Unblock::HTTP1::_Wire::request_plan($bad_host);
+        1;
+    };
+    ok(!$bad_host_ok, 'outgoing invalid Host field is rejected');
+    like($@, qr/invalid Host field/,
+        'invalid Host error is explicit');
+
     my $space = Uniform::HTTP::Request->new(
         method  => 'GET',
         target  => '/bad path',
