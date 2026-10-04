@@ -14,6 +14,47 @@ use constant INPUT_MORE    => 1;
 use constant INPUT_CLOSED  => 3;
 use constant INPUT_SWITCH  => 4;
 
+sub c_header {
+    return <<'END_C_HEADER';
+#ifndef UNBLOCK_HTTP1_INPUT_ABI_H
+#define UNBLOCK_HTTP1_INPUT_ABI_H
+
+#include "EXTERN.h"
+#include "perl.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#define UB_HTTP1_INPUT_ABI_VERSION 1U
+
+#define UB_HTTP1_INPUT_OK     0
+#define UB_HTTP1_INPUT_MORE   1
+#define UB_HTTP1_INPUT_CLOSED 3
+#define UB_HTTP1_INPUT_SWITCH 4
+
+typedef struct ub_http1_input_ops_v1_s {
+    uint32_t abi_version;
+    size_t struct_size;
+    const char *name;
+
+    void *(*create)(pTHX_ SV *engine);
+
+    int (*input)(
+        pTHX_
+        void *context,
+        const char *data,
+        size_t length,
+        size_t *consumed
+    );
+
+    int (*eof)(pTHX_ void *context);
+
+    void (*destroy)(pTHX_ void *context);
+} ub_http1_input_ops_v1;
+
+#endif
+END_C_HEADER
+}
+
 sub definition {
     return {
         provider           => \&Unblock::HTTP1::_Native::_borrowed_input_operations_address,
@@ -55,6 +96,20 @@ The returned hash contains:
 
 C<provider> keeps the XS provider loaded and can be called again to obtain the
 current operations address. C<abi_version> is currently 1.
+
+=head1 C ABI
+
+C<c_header()> returns the ABI version 1 C declaration. Build-time adapters may
+write this text to a generated header rather than carrying a private copy of
+the ABI layout.
+
+The operations table contains C<abi_version>, C<struct_size>, C<name>,
+C<create>, C<input>, C<eof>, and C<destroy>. Consumers must check both the ABI
+version and structure size before dereferencing operations.
+
+C<create> receives the Unblock::HTTP1 Client or Server object and returns one
+connection-local native context. Keep that context for the lifetime of the
+HTTP connection instead of creating it for every read.
 
 =head1 INPUT RESULTS
 
