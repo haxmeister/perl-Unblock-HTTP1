@@ -23,6 +23,13 @@ subtest 'received CONNECT request target and framing are strict' => sub {
     );
     ok($ipv6->{ok}, 'bracketed IPv6 CONNECT authority is accepted');
 
+    my $host_without_port = parse(
+        "CONNECT example.test:443 HTTP/1.1\r\n" .
+        "Host: example.test\r\n\r\n"
+    );
+    ok($host_without_port->{ok},
+        'CONNECT Host may omit the port carried by authority-form');
+
     my @bad = (
         [
             'origin-form CONNECT target',
@@ -67,6 +74,21 @@ subtest 'received CONNECT request target and framing are strict' => sub {
         ok(!$result->{ok}, "$name is rejected");
         is($result->{status}, 400, "$name maps to 400");
     }
+};
+
+subtest 'outgoing CONNECT Host may omit authority port' => sub {
+    my $request = Uniform::HTTP::Request->new(
+        method  => 'CONNECT',
+        target  => 'example.test:443',
+        headers => [ [ Host => 'example.test' ] ],
+    );
+
+    my $plan = Unblock::HTTP1::_Wire::request_plan($request);
+    like(
+        $plan->{wire},
+        qr/\ACONNECT example\.test:443 HTTP\/1\.1\r\nHost: example\.test\r\n/,
+        'CONNECT serializes with Host that identifies the target host',
+    );
 };
 
 subtest 'asterisk and basic request-target forms are validated' => sub {
