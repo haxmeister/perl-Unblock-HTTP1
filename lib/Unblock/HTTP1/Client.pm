@@ -84,9 +84,9 @@ sub _drive {
     my ($self) = @_;
 
     if (!$self->{closed} && !$self->{switched}
-        && !$self->{active} && length($self->{input})) {
-        if ($self->{input} =~ /\A(?:\r\n)+\z/) {
-            $self->{input} = '';
+        && !$self->{active} && $self->_input_length) {
+        if ($self->_input_remaining =~ /\A(?:\r\n)+\z/) {
+            $self->_input_clear;
             return;
         }
         return $self->_connection_error(
@@ -99,18 +99,19 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$rx) {
+            my ($input, $offset) = $self->_input_window;
             my $head = Unblock::HTTP1::_Native->parse_response_head(
-                $self->{input}, 0, $self->{max_headers},
+                $input, 0, $self->{max_headers}, $offset,
             );
             if (!$head) {
                 return $self->_connection_error('HTTP/1 response head exceeds configured limit')
-                    if length($self->{input}) > $self->{max_head_size};
+                    if $self->_input_length > $self->{max_head_size};
                 return;
             }
             return $self->_connection_error($head->{error}) unless $head->{ok};
             return $self->_connection_error('HTTP/1 response head exceeds configured limit')
                 if $head->{consumed} > $self->{max_head_size};
-            substr($self->{input}, 0, $head->{consumed}, '');
+            $self->_input_discard($head->{consumed});
 
             my $informational =
                 $head->{status} >= 100 && $head->{status} < 200
@@ -138,7 +139,7 @@ sub _drive {
             my $fixed_ready = !$plan->{switch}
                 && $plan->{mode} eq 'content-length'
                 && defined($plan->{remaining})
-                && length($self->{input}) >= $plan->{remaining};
+                && $self->_input_length >= $plan->{remaining};
             my $immediate = !$plan->{switch}
                 && ($plan->{mode} eq 'none' || $fixed_ready);
 
@@ -186,7 +187,7 @@ sub _drive {
             if ($fixed_ready) {
                 my $length = $plan->{remaining};
                 if ($length) {
-                    my $bytes = substr($self->{input}, 0, $length, '');
+                    my $bytes = $self->_input_take($length);
                     return $self->_connection_error(
                         '205 response must not contain content'
                     ) if $plan->{forbid_content} && length $bytes;
@@ -204,10 +205,11 @@ sub _drive {
 
         $rx = $self->{rx} or next;
         if ($rx->{mode} eq 'content-length') {
-            return unless length $self->{input};
-            my $take = length($self->{input}) < $rx->{remaining}
-                ? length($self->{input}) : $rx->{remaining};
-            my $bytes = substr($self->{input}, 0, $take, '');
+            return unless $self->_input_length;
+            my $available = $self->_input_length;
+            my $take = $available < $rx->{remaining}
+                ? $available : $rx->{remaining};
+            my $bytes = $self->_input_take($take);
             $rx->{remaining} -= $take;
             return $self->_connection_error('205 response must not contain content')
                 if $rx->{forbid_content} && length $bytes;
@@ -221,14 +223,17 @@ sub _drive {
         }
 
         if ($rx->{mode} eq 'chunked') {
-            return unless length $self->{input};
+            return unless $self->_input_length;
+            my ($input, $offset) = $self->_input_window;
+            my $available = $self->_input_length;
             my ($done, $decoded, $leftover);
             my $ok = eval {
-                ($done, $decoded, $leftover) = $rx->{decoder}->feed($self->{input}, 1);
+                ($done, $decoded, $leftover) =
+                    $rx->{decoder}->feed($input, 1, $offset);
                 1;
             };
             return $self->_connection_error("$@") unless $ok;
-            $self->{input} = $leftover;
+            $self->_input_discard($available - length($leftover));
             if (defined($decoded) && length($decoded)) {
                 return $self->_connection_error('205 response must not contain content')
                     if $rx->{forbid_content};
@@ -242,12 +247,13 @@ sub _drive {
         }
 
         if ($rx->{mode} eq 'trailers') {
+            my ($input, $offset) = $self->_input_window;
             my $trailers = Unblock::HTTP1::_Native->parse_trailers(
-                $self->{input}, 0, $self->{max_headers},
+                $input, 0, $self->{max_headers}, $offset,
             );
             if (!$trailers) {
                 return $self->_connection_error('HTTP/1 trailer section exceeds configured limit')
-                    if length($self->{input}) > $self->{max_head_size};
+                    if $self->_input_length > $self->{max_head_size};
                 return;
             }
             return $self->_connection_error($trailers->{error}) unless $trailers->{ok};
@@ -260,14 +266,14 @@ sub _drive {
                         || $name eq 'host' || $name eq 'connection' || $name eq 'trailer';
                 $rx->{response}->add_trailer(@$field);
             }
-            substr($self->{input}, 0, $trailers->{consumed}, '');
+            $self->_input_discard($trailers->{consumed});
             $self->_finish_response;
             next;
         }
 
         if ($rx->{mode} eq 'close') {
-            return unless length $self->{input};
-            my $bytes = substr($self->{input}, 0, length($self->{input}), '');
+            return unless $self->_input_length;
+            my $bytes = $self->_input_take($self->_input_length);
             return $self->_connection_error('205 response must not contain content')
                 if $rx->{forbid_content} && length $bytes;
             my $cb = $tx->_invoke('on_body', $rx->{response}, $bytes);
@@ -318,7 +324,7 @@ sub _retire_if_done {
     return $self->_connection_error($cb) unless $cb eq '1';
 
     my $keep = $tx->{keep_alive} && $tx->{send_plan}{keep_alive};
-    my $extra = length($self->{input}) ? 1 : 0;
+    my $extra = $self->_input_length ? 1 : 0;
     $self->{active} = undef;
 
     # This client serializes requests and never pipelines them. Therefore,
@@ -326,7 +332,7 @@ sub _retire_if_done {
     # a later response. Do not retain them for a future request: doing so would
     # allow an unsolicited response to poison the response queue.
     if ($extra) {
-        $self->{input} = '';
+        $self->_input_clear;
         $self->{closed} = 1;
         $self->_fail_queued('unexpected bytes after final HTTP/1 response');
         return;
