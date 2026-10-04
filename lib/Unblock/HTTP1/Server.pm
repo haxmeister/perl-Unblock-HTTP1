@@ -104,7 +104,7 @@ sub _drive {
                     request   => $request,
                 };
                 if ($rx->{mode} eq 'chunked') {
-                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
+                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new($self->{max_chunk_extension_size});
                 }
             }
 
