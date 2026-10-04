@@ -122,6 +122,13 @@ subtest 'response serializer rejects header and reason injection' => sub {
             ),
             qr/invalid HTTP\/1 response reason phrase/,
         ],
+        [
+            'invalid HTTP status',
+            Unblock::HTTP1::UnsafeResponse->new(
+                status => 600,
+            ),
+            qr/response status must be a three-digit integer from 100 through 599/,
+        ],
     );
 
     for my $case (@case) {
