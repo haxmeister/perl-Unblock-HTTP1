@@ -41,10 +41,13 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$tx) {
-            my ($input, $offset) = $self->_input_window;
-            my $head = Unblock::HTTP1::_Native->parse_request_head(
-                $input, 0, $self->{max_headers}, $offset,
-            );
+            my $head = delete $self->{borrowed_head};
+            if (!$head) {
+                my ($input, $offset) = $self->_input_window;
+                $head = Unblock::HTTP1::_Native->parse_request_head(
+                    $input, 0, $self->{max_headers}, $offset,
+                );
+            }
             if (!$head) {
                 if ($self->_input_length > $self->{max_head_size}) {
                     $self->_protocol_error(431, 'request head exceeds configured limit');
@@ -428,6 +431,14 @@ sub _protocol_error {
 sub _borrowed_should_buffer_tail {
     my ($self) = @_;
     return $self->{active} && !$self->{rx} ? 1 : 0;
+}
+
+sub _borrowed_native_head_ready {
+    my ($self) = @_;
+    return 0 if $self->{closed} || $self->{switched};
+    return 0 if $self->{active} || $self->{rx};
+    return 0 if length $self->{input};
+    return 1;
 }
 
 sub _on_eof {
