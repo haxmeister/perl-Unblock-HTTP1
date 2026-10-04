@@ -47,6 +47,7 @@ t/40-client-extra-response.t
 t/41-response-transfer-coding.t
 t/42-content-length.t
 t/43-version-compat.t
+t/44-serialization-security.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
