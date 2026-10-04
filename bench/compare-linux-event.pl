@@ -8,6 +8,7 @@ use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 use Unblock::HTTP1;
 use Unblock::HTTP1::_Native;
+use Unblock::HTTP1::_Wire;
 
 eval {
     require Linux::Event::HTTP::_HTTP1;
@@ -40,43 +41,6 @@ my $response_head = Unblock::HTTP1::_Native->parse_response_head(
 die "Unblock response setup parse failed\n"
     unless $response_head && $response_head->{ok};
 
-sub trusted_uniform_request {
-    my ($parsed) = @_;
-    return bless {
-        version           => $parsed->{version},
-        headers           => $parsed->{headers},
-        trailers          => [],
-        initial_frozen    => 1,
-        trailers_frozen   => 1,
-        body              => undef,
-        has_buffered_body => 0,
-        complete          => 1,
-        mutable           => 0,
-        method            => $parsed->{method},
-        target            => $parsed->{target},
-        scheme            => undef,
-        authority         => undef,
-        protocol          => undef,
-    }, 'Uniform::HTTP::Request';
-}
-
-sub trusted_uniform_response {
-    my ($parsed) = @_;
-    return bless {
-        version           => $parsed->{version},
-        headers           => $parsed->{headers},
-        trailers          => [],
-        initial_frozen    => 1,
-        trailers_frozen   => 0,
-        body              => undef,
-        has_buffered_body => 0,
-        complete          => 0,
-        mutable           => 1,
-        status            => $parsed->{status},
-        reason            => $parsed->{reason},
-    }, 'Uniform::HTTP::Response';
-}
-
 print "HTTP/1 receive-path comparison\n";
 print "Perl $] ($Config{archname})\n";
 print "Unblock::HTTP1 $Unblock::HTTP1::VERSION\n";
@@ -85,9 +49,8 @@ print "approximately $seconds CPU seconds per case\n\n";
 
 print "The public-object cases are the useful cross-engine comparison.\n";
 print "The native cases expose different internal contracts and are diagnostic only.\n";
-print "The trusted-shape case is diagnostic only and deliberately bypasses the\n";
-print "documented Uniform constructor to estimate the value of a sanctioned\n";
-print "trusted-parser construction API. It is not production code.\n\n";
+print "The Uniform fast-path cases use the sanctioned Uniform::HTTP 0.05 ABI.\n";
+print "They measure production trusted-parser construction rather than a direct-bless ceiling.\n\n";
 
 cmpthese(
     -$seconds,
@@ -141,13 +104,14 @@ cmpthese(
             die "Unblock construction failure"
                 unless $request->method eq 'GET';
         },
-        unblock_trusted_shape => sub {
+        unblock_fastpath_request => sub {
             my $parsed = Unblock::HTTP1::_Native->parse_request_head(
                 $wire, 0, 100,
             );
             die "Unblock parse failure" unless $parsed && $parsed->{ok};
-            my $request = trusted_uniform_request($parsed);
-            die "trusted-shape access failure"
+            my $request =
+                Unblock::HTTP1::_Wire::_request_from_validated_head($parsed);
+            die "fast-path request access failure"
                 unless $request->method eq 'GET'
                     && $request->target eq '/api/resource?x=1'
                     && ($request->header('Host') || '') eq 'example.test';
@@ -180,14 +144,17 @@ cmpthese(
             die "Unblock response construction failure"
                 unless $response->status == 200;
         },
-        unblock_trusted_response => sub {
+        unblock_fastpath_response => sub {
             my $parsed = Unblock::HTTP1::_Native->parse_response_head(
                 $response_wire, 0, 100,
             );
             die "Unblock response parse failure"
                 unless $parsed && $parsed->{ok};
-            my $response = trusted_uniform_response($parsed);
-            die "trusted response access failure"
+            my $response =
+                Unblock::HTTP1::_Wire::_response_from_validated_head(
+                    $parsed, 0,
+                );
+            die "fast-path response access failure"
                 unless $response->status == 200
                     && ($response->header('Content-Type') || '') eq 'text/plain';
         },

@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
-          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest Uniform::HTTP@0.05
           cpanm --notest --installdeps .
 
       - name: Build

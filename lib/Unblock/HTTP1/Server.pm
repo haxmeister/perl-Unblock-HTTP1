@@ -68,18 +68,9 @@ sub _drive {
             my %target_metadata = Unblock::HTTP1::_Wire::_received_request_metadata(
                 $head->{method}, $head->{target},
             );
-            my $request = Uniform::HTTP::Request->new(
-                method  => $head->{method},
-                target  => $head->{target},
-                version => $head->{version},
-                headers => $head->{headers},
-                %target_metadata,
+            my $request = Unblock::HTTP1::_Wire::_request_from_validated_head(
+                $head, %target_metadata,
             );
-            if ($head->{body_mode} eq 'none') {
-                $request->freeze;
-            } else {
-                $request->mark_incomplete->freeze_initial;
-            }
 
             $tx = Unblock::HTTP1::Transaction->_new(
                 $self, $request,
