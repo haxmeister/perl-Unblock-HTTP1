@@ -1,10 +1,10 @@
 # HTTP/1 parity status
 
-This file tracks the protocol behavior that Unblock::HTTP1 must own before
-Linux::Event::HTTP delegates its HTTP/1 engine to this distribution.
+This file tracks the protocol behavior owned by the standalone Unblock::HTTP1
+engine.
 
-The goal is protocol parity, not source-code parity. Linux::Event-specific
-socket, TLS, event-loop, and live-object transition code does not belong here.
+The goal is complete, portable HTTP/1 protocol behavior rather than parity with
+the source code or object model of any particular framework.
 
 ## Implemented protocol behavior
 
@@ -127,12 +127,12 @@ framing responsibilities:
 - request replay policy
 - WebSocket framing
 - tunnel protocol implementation
-- Linux::Event Stream reblessing or native consumer installation
+- framework-specific object transitions or native consumer installation
 
-Linux::Event::HTTP can continue to own those responsibilities while delegating
-HTTP/1 bytes and message boundaries to Unblock::HTTP1.
+Those responsibilities belong to callers, transports, adapters, or higher HTTP
+client/server layers.
 
-## Validation completed before Linux::Event integration
+## Validation completed
 
 The portable engine now has:
 
@@ -173,30 +173,22 @@ Current standalone measurements show:
 Absolute benchmark rates vary with the CI runner. Same-run ratios are the
 useful development signal.
 
-## Ready for Linux::Event integration
+## Portable engine status
 
-The portable HTTP/1 engine has completed its planned protocol-parity,
+The standalone HTTP/1 engine has completed its planned protocol-completeness,
 cross-platform, security-hardening, and benchmark passes.
 
-The direct receive-path comparison with Linux::Event::HTTP is complete. It
-shows that native parsing is already fast and that repeated Uniform message
-construction is the clearest remaining receive-side cost. No additional XS
-migration is currently justified by the standalone measurements.
+Native parsing is already much faster than complete transaction processing, so
+no additional XS migration is currently justified by standalone measurements.
+The clearest measured optimization opportunity is repeated Uniform message
+construction. A sanctioned trusted-construction API can be evaluated
+separately; Unblock::HTTP1 is correct without it and must not depend on
+undocumented Uniform object layout.
 
-The Linux::Event adapter contract is defined in docs/LINUX_EVENT_BRIDGE.md.
-The canonical integration should use the public byte API first. A native
-Stream-consumer bridge remains optional and should only be added if end-to-end
-Linux::Event integration benchmarks show that byte movement or adapter dispatch
-is material.
+Future adapters should begin with the public byte API. Transport-specific native
+bridges are optional optimizations and should only be introduced when
+end-to-end measurements show that byte movement or adapter dispatch is a
+material cost.
 
-Two items remain outside this repository's portable protocol work:
-
-1. Decide separately whether the measured trusted-construction opportunity
-   justifies a sanctioned Uniform::HTTP API change. Unblock::HTTP1 is correct
-   without that optimization and must not depend on undocumented Uniform object
-   layout.
-2. Integrate Linux::Event::HTTP against the public Unblock::HTTP1 engine and
-   rerun its HTTP/1 suite and end-to-end benchmarks in that repository.
-
-The cross-platform test and benchmark workflows on main should remain green
-while those integration steps proceed.
+The cross-platform test and benchmark workflows on main should remain green as
+the engine evolves.
