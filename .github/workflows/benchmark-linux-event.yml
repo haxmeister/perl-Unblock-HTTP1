@@ -30,7 +30,7 @@ jobs:
       - name: Install Unblock dependencies
         shell: bash
         run: |
-          cpanm --notest Uniform::HTTP@0.05
+          cpanm --notest Uniform::HTTP@0.06
           cpanm --notest --installdeps .
 
       - name: Build Unblock::HTTP1
