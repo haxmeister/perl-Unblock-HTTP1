@@ -107,6 +107,13 @@ sub _drive {
                 headers => $head->{headers},
             );
 
+            my $plan;
+            my $ok = eval {
+                $plan = Unblock::HTTP1::_Wire::response_receive_plan($tx->request, $head);
+                1;
+            };
+            return $self->_connection_error("$@") unless $ok;
+
             if ($head->{status} >= 100 && $head->{status} < 200 && $head->{status} != 101) {
                 $response->freeze;
                 my $cb = $tx->_invoke('on_informational', $response);
@@ -116,19 +123,14 @@ sub _drive {
 
             $response->mark_incomplete->freeze_initial;
             $tx->_set_response($response);
-            my $plan;
-            my $ok = eval {
-                $plan = Unblock::HTTP1::_Wire::response_receive_plan($tx->request, $head);
-                1;
-            };
-            return $self->_connection_error("$@") unless $ok;
 
             $self->{rx} = $rx = {
                 response   => $response,
                 mode       => $plan->{mode},
                 remaining  => $plan->{remaining},
-                keep_alive => $plan->{keep_alive},
-                switch     => $plan->{switch},
+                keep_alive     => $plan->{keep_alive},
+                switch         => $plan->{switch},
+                forbid_content => $plan->{forbid_content} ? 1 : 0,
             };
 
             my $cb = $tx->_invoke('on_response', $response);
@@ -167,6 +169,8 @@ sub _drive {
                 ? length($self->{input}) : $rx->{remaining};
             my $bytes = substr($self->{input}, 0, $take, '');
             $rx->{remaining} -= $take;
+            return $self->_connection_error('205 response must not contain content')
+                if $rx->{forbid_content} && length $bytes;
             my $cb = $tx->_invoke('on_body', $rx->{response}, $bytes);
             return $self->_connection_error($cb) unless $cb eq '1';
             if ($rx->{remaining} == 0) {
@@ -186,6 +190,8 @@ sub _drive {
             return $self->_connection_error("$@") unless $ok;
             $self->{input} = $leftover;
             if (defined($decoded) && length($decoded)) {
+                return $self->_connection_error('205 response must not contain content')
+                    if $rx->{forbid_content};
                 my $cb = $tx->_invoke('on_body', $rx->{response}, $decoded);
                 return $self->_connection_error($cb) unless $cb eq '1';
             }
@@ -222,6 +228,8 @@ sub _drive {
         if ($rx->{mode} eq 'close') {
             return unless length $self->{input};
             my $bytes = substr($self->{input}, 0, length($self->{input}), '');
+            return $self->_connection_error('205 response must not contain content')
+                if $rx->{forbid_content} && length $bytes;
             my $cb = $tx->_invoke('on_body', $rx->{response}, $bytes);
             return $self->_connection_error($cb) unless $cb eq '1';
             return;
