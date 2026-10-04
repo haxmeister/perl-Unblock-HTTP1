@@ -47,10 +47,14 @@ The useful standalone comparison is:
 9. client-only and server-only HTTP/1 cycles;
 10. common-path versus full-planner buffered serialization.
 
-The cross-engine comparison benchmark also measures receive-side Uniform object
-materialization. Its trusted-shape cases are diagnostics only: they estimate
-the ceiling of a future sanctioned trusted-construction API and deliberately
-must not be used by production engine code. See docs/TRUSTED_UNIFORM.md.
+The serialization diagnostic compares canonical Uniform objects using the
+Uniform::HTTP 0.05 FastPath ABI with subclassed objects using the portable
+method contract. It also compares ordinary Uniform constructor materialization
+with trusted parser construction through the sanctioned FastPath ABI.
+
+The cross-engine comparison benchmark uses the same sanctioned trusted
+construction path for received requests and responses. See
+docs/TRUSTED_UNIFORM.md.
 
 Use cross-engine comparisons and profiles only to identify portable engine
 costs. Framework-specific integration decisions belong to the consuming
