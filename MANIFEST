@@ -41,6 +41,7 @@ t/34-queue-reuse.t
 t/35-limits.t
 t/36-lifecycle-reentrancy.t
 t/37-fast-paths.t
+t/38-method-case.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
