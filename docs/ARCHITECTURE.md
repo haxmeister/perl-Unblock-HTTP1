@@ -97,7 +97,7 @@ No response body is consumed for HEAD, informational responses, 204, 205, 304,
 101, or successful CONNECT. Other final responses use Transfer-Encoding, then Content-Length, then
 connection close.
 
-When a response Transfer-Encoding ends in C<chunked>, Unblock owns that final
+When a response Transfer-Encoding ends in `chunked`, Unblock owns that final
 chunk framing. Earlier transfer codings remain encoded in the body bytes. When
 the final transfer coding is not chunked, EOF delimits the message and the
 connection is not reusable. The same rule applies when serializing responses:
