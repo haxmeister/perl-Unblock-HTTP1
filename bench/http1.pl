@@ -97,6 +97,15 @@ my $server_cycle = Unblock::HTTP1::Server->new(
 );
 my $client_cycle = Unblock::HTTP1::Client->new;
 
+my $borrowed_client_cycle = Unblock::HTTP1::Client->new;
+my $borrowed_client_driver =
+    Unblock::HTTP1::_Native::BorrowedDriver->new($borrowed_client_cycle);
+
+my $portable_client_batch = Unblock::HTTP1::Client->new;
+my $borrowed_client_batch = Unblock::HTTP1::Client->new;
+my $borrowed_client_batch_driver =
+    Unblock::HTTP1::_Native::BorrowedDriver->new($borrowed_client_batch);
+
 my $borrowed_server_cycle = Unblock::HTTP1::Server->new(
     on_request => sub {
         $_[0]->respond($response);
@@ -245,6 +254,36 @@ cmpthese(
             $client_cycle->output;
             $client_cycle->input($response_exchange_wire);
             die "client cycle failure" unless $tx->is_complete;
+        },
+        client_get_borrowed => sub {
+            my $tx = $borrowed_client_cycle->request($request);
+            $borrowed_client_cycle->output;
+            my ($status, $consumed) =
+                $borrowed_client_driver->feed($response_exchange_wire);
+            die "borrowed client cycle failure"
+                unless $status == 0
+                    && $consumed == length($response_exchange_wire)
+                    && $tx->is_complete;
+        },
+        client_get_batch_portable_100 => sub {
+            for (1 .. $native_batch) {
+                my $tx = $portable_client_batch->request($request);
+                $portable_client_batch->output;
+                $portable_client_batch->input($response_exchange_wire);
+                die "portable client batch failure" unless $tx->is_complete;
+            }
+        },
+        client_get_batch_borrowed_100 => sub {
+            for (1 .. $native_batch) {
+                my $tx = $borrowed_client_batch->request($request);
+                $borrowed_client_batch->output;
+                my ($status, $consumed) =
+                    $borrowed_client_batch_driver->feed($response_exchange_wire);
+                die "borrowed client batch failure"
+                    unless $status == 0
+                        && $consumed == length($response_exchange_wire)
+                        && $tx->is_complete;
+            }
         },
         reuse_get => sub {
             my $tx = $reuse_get_client->request($request);
