@@ -3,6 +3,7 @@ use warnings;
 use Test::More;
 
 use Uniform::HTTP::Request;
+use Unblock::HTTP1::Server;
 use Unblock::HTTP1::_Native;
 use Unblock::HTTP1::_Wire;
 
