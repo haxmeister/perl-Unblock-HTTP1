@@ -510,6 +510,13 @@ sub _serialize_fields {
     return $wire;
 }
 
+sub _semantics_version {
+    my ($version) = @_;
+    return '1.0' if $version eq '1.0';
+    return '1.1' if $version =~ /\A1\.[1-9]\z/;
+    croak 'unsupported HTTP/1 version';
+}
+
 sub _version {
     my ($message, $default) = @_;
     my $version = $message->version;
@@ -799,8 +806,8 @@ sub response_receive_plan {
     my $method = $request->method;
 
     if ($method eq 'CONNECT' && $status >= 200 && $status < 300) {
-        croak 'HTTP/1 CONNECT successful response must use HTTP/1.1'
-            unless $head->{version} eq '1.1';
+        croak 'HTTP/1 CONNECT successful response must use HTTP/1.1 semantics'
+            unless _semantics_version($head->{version}) eq '1.1';
         return {
             mode       => 'none',
             remaining  => undef,
@@ -824,14 +831,15 @@ sub response_receive_plan {
         };
     }
 
+    my $response_semantics = _semantics_version($head->{version});
     my $tokens = _connection_tokens($fields);
     my $keep_alive = $tokens->{close} ? 0
-        : $head->{version} eq '1.1' ? 1
+        : $response_semantics eq '1.1' ? 1
         : $tokens->{'keep-alive'} ? 1 : 0;
 
     my $raw_te = _values($fields, 'Transfer-Encoding');
     croak 'HTTP/1.0 response must not contain Transfer-Encoding'
-        if $head->{version} eq '1.0' && @$raw_te;
+        if $response_semantics eq '1.0' && @$raw_te;
 
     # HEAD and 304 never carry HTTP content. Content-Length and
     # Transfer-Encoding, when present, describe the corresponding selected
@@ -896,11 +904,10 @@ sub response_plan {
         return $simple;
     }
 
-    my $request_version = $request->version || '1.1';
-    croak 'request version is not HTTP/1.0 or HTTP/1.1'
-        unless $request_version eq '1.0' || $request_version eq '1.1';
+    my $received_request_version = $request->version || '1.1';
+    my $request_version = _semantics_version($received_request_version);
     if (defined $response->version && $response->version ne $request_version) {
-        croak 'response version conflicts with the HTTP/1 request version';
+        croak 'response version conflicts with supported HTTP/1 response semantics';
     }
 
     my $status = $response->status;
