@@ -12,7 +12,7 @@ boundaries, but it does not open sockets or choose an event loop.
 The same engine can be used with any reliable ordered byte stream.
 
 The normal API accepts Perl byte strings. XS-backed transports can optionally
-use C<Unblock::HTTP1::NativeABI> to feed borrowed native buffers directly. The
+use `Unblock::HTTP1::NativeABI` to feed borrowed native buffers directly. The
 transport keeps ownership of the buffer and Unblock reports how much of it was
 consumed.
 
