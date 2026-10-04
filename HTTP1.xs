@@ -488,7 +488,7 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             RETVAL = new_error_result(aTHX_ 431, "too many HTTP/1 request header fields");
         else
             RETVAL = new_error_result(aTHX_ 400, "malformed HTTP/1 request");
-    } else if (minor != 0 && minor != 1) {
+    } else if (minor < 0 || minor > 9) {
         RETVAL = new_error_result(aTHX_ 505, "unsupported HTTP/1 version");
     } else if (!strict_headers(headers, count)) {
         RETVAL = new_error_result(aTHX_ 400, "invalid or folded HTTP/1 header field");
@@ -500,8 +500,8 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             error = "invalid HTTP/1 request target";
             error_status = 400;
         }
-        if (!error && is_connect && minor != 1) {
-            error = "CONNECT requires HTTP/1.1";
+        if (!error && is_connect && minor == 0) {
+            error = "CONNECT requires HTTP/1.1 semantics";
             error_status = 400;
         }
         for (i = 0; i < count && !error; ++i) {
@@ -546,8 +546,8 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
         if (!error && host_count > 1) {
             error = "multiple Host fields"; error_status = 400;
         }
-        if (!error && minor == 1 && host_count != 1) {
-            error = "HTTP/1.1 request requires exactly one Host field"; error_status = 400;
+        if (!error && minor >= 1 && host_count != 1) {
+            error = "HTTP/1.1 semantics require exactly one Host field"; error_status = 400;
         }
         if (!error && te_present && has_cl) {
             error = "Transfer-Encoding and Content-Length cannot be combined"; error_status = 400;
@@ -595,7 +595,7 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             if (has_cl)
                 hv_store(hv, "content_length", 14, newSVuv(content_length), 0);
             hv_store(hv, "keep_alive", 10,
-                newSViv(close_seen ? 0 : (minor == 1 ? 1 : (keep_seen ? 1 : 0))), 0);
+                newSViv(close_seen ? 0 : (minor >= 1 ? 1 : (keep_seen ? 1 : 0))), 0);
             hv_store(hv, "expect_continue", 15, newSViv(expect_mode), 0);
             RETVAL = newRV_noinc((SV *)hv);
         }
@@ -632,9 +632,9 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100)
     consumed = phr_parse_response(buf, (size_t)buffer_len, &minor, &status,
         &reason, &reason_len, headers, &count, (size_t)last_len);
     if (consumed == -2) XSRETURN_UNDEF;
-    if (consumed == -1 || (minor != 0 && minor != 1) || status < 100 || status > 599 ||
+    if (consumed == -1 || minor < 0 || minor > 9 || status < 100 || status > 599 ||
         buffer_len < 13 || !memEQ(buf, "HTTP/1.", 7) ||
-        (buf[7] != '0' && buf[7] != '1') || buf[8] != ' ' ||
+        buf[7] < '0' || buf[7] > '9' || buf[8] != ' ' ||
         buf[9] < '0' || buf[9] > '9' ||
         buf[10] < '0' || buf[10] > '9' ||
         buf[11] < '0' || buf[11] > '9' || buf[12] != ' ' ||
