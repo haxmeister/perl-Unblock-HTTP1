@@ -66,6 +66,50 @@ my $stream_request = Uniform::HTTP::Request->new(
     authority => 'example.test',
 );
 
+my $stream_response = Uniform::HTTP::Response->new(status => 200);
+
+my $reuse_get_server = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        $_[0]->respond($response);
+    },
+);
+my $reuse_get_client = Unblock::HTTP1::Client->new;
+
+my $reuse_fixed_request_bytes = 0;
+my $reuse_fixed_response_bytes = 0;
+my $reuse_fixed_server = Unblock::HTTP1::Server->new(
+    on_request => sub { },
+    on_body => sub {
+        $reuse_fixed_request_bytes += length $_[2];
+    },
+    on_request_end => sub {
+        $_[0]->respond($fixed_response);
+    },
+);
+my $reuse_fixed_client = Unblock::HTTP1::Client->new;
+my $reuse_fixed_on_body = sub {
+    $reuse_fixed_response_bytes += length $_[2];
+};
+
+my $reuse_chunked_request_bytes = 0;
+my $reuse_chunked_response_bytes = 0;
+my $reuse_chunked_server = Unblock::HTTP1::Server->new(
+    on_request => sub { },
+    on_body => sub {
+        $reuse_chunked_request_bytes += length $_[2];
+    },
+    on_request_end => sub {
+        my ($tx) = @_;
+        $tx->respond($stream_response, stream_body => 1);
+        $tx->write($chunk) for 1 .. 3;
+        $tx->end($chunk);
+    },
+);
+my $reuse_chunked_client = Unblock::HTTP1::Client->new;
+my $reuse_chunked_on_body = sub {
+    $reuse_chunked_response_bytes += length $_[2];
+};
+
 print "Unblock::HTTP1 $Unblock::HTTP1::VERSION benchmark\n";
 print "Perl $] ($Config{archname})\n";
 print "picohttpparser ", Unblock::HTTP1::_Native->pico_version, "\n";
@@ -89,6 +133,50 @@ cmpthese(
         serialize_response => sub {
             my $plan = Unblock::HTTP1::_Wire::response_plan($request, $response);
             die "serialize failure" unless length $plan->{wire};
+        },
+        reuse_get => sub {
+            my $tx = $reuse_get_client->request($request);
+            $reuse_get_server->input($reuse_get_client->output);
+            $reuse_get_client->input($reuse_get_server->output);
+            die "reused GET exchange failure" unless $tx->is_complete;
+        },
+        reuse_fixed_4k => sub {
+            $reuse_fixed_request_bytes = 0;
+            $reuse_fixed_response_bytes = 0;
+            my $tx = $reuse_fixed_client->request(
+                $fixed_request,
+                on_body => $reuse_fixed_on_body,
+            );
+            $reuse_fixed_server->input($reuse_fixed_client->output);
+            $reuse_fixed_client->input($reuse_fixed_server->output);
+            die "reused fixed exchange failure"
+                unless $tx->is_complete
+                    && $reuse_fixed_request_bytes == $body_size
+                    && $reuse_fixed_response_bytes == $body_size;
+        },
+        reuse_chunked_4k => sub {
+            $reuse_chunked_request_bytes = 0;
+            $reuse_chunked_response_bytes = 0;
+            my $tx = $reuse_chunked_client->request(
+                $stream_request,
+                stream_body => 1,
+                on_body => $reuse_chunked_on_body,
+            );
+
+            my $wire = $reuse_chunked_client->output;
+            for (1 .. 3) {
+                $tx->write($chunk);
+                $wire .= $reuse_chunked_client->output;
+            }
+            $tx->end($chunk);
+            $wire .= $reuse_chunked_client->output;
+
+            $reuse_chunked_server->input($wire);
+            $reuse_chunked_client->input($reuse_chunked_server->output);
+            die "reused chunked exchange failure"
+                unless $tx->is_complete
+                    && $reuse_chunked_request_bytes == $body_size
+                    && $reuse_chunked_response_bytes == $body_size;
         },
         loopback_get => sub {
             my $server = Unblock::HTTP1::Server->new(
