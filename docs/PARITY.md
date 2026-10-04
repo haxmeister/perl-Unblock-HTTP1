@@ -147,10 +147,12 @@ The remaining work is now primarily performance and integration work:
    implementation;
 3. profile Uniform message construction, callback dispatch, and remaining
    state transitions identified by those comparisons;
-4. move additional work into XS only where same-run benchmarks justify it;
-5. define the optional Linux::Event native Stream-consumer bridge without
+4. evaluate the trusted Uniform construction requirements in
+   docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change;
+5. move additional work into XS only where same-run benchmarks justify it;
+6. define the optional Linux::Event native Stream-consumer bridge without
    making it part of the portable Unblock API;
-6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
+7. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
    existing HTTP/1 suite unchanged where practical.
 
 The Linux::Event adapter must remain an optimization and transport binding.
