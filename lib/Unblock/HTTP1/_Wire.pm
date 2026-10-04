@@ -664,6 +664,49 @@ sub _append_transfer_coding {
     return \@out;
 }
 
+sub _ensure_trailer_header {
+    my ($fields, $trailers) = @_;
+    return $fields unless $trailers && @$trailers;
+
+    my @out = map { [ @$_ ] } @$fields;
+    my %announced;
+    my $last_trailer_field;
+
+    for my $index (0 .. $#out) {
+        next unless _lc($out[$index][0]) eq 'trailer';
+        $last_trailer_field = $index;
+
+        for my $name (split /,/, $out[$index][1], -1) {
+            $name = _trim($name);
+            next unless length $name;
+            $name = _field_name('Trailer', $name);
+            $announced{ _lc($name) } = 1;
+        }
+    }
+
+    my @missing;
+    for my $field (@$trailers) {
+        my $name = _field_name('trailer', $field->[0]);
+        my $key = _lc($name);
+        next if $announced{$key}++;
+        push @missing, $name;
+    }
+
+    return \@out unless @missing;
+
+    if (defined $last_trailer_field) {
+        my $value = _trim($out[$last_trailer_field][1]);
+        $out[$last_trailer_field][1] =
+            length($value)
+                ? $value . ', ' . join(', ', @missing)
+                : join(', ', @missing);
+    } else {
+        push @out, [ 'Trailer', join(', ', @missing) ];
+    }
+
+    return \@out;
+}
+
 sub _append_connection_token {
     my ($fields, $token) = @_;
     my @out = map { [ @$_ ] } @$fields;
@@ -928,6 +971,8 @@ sub request_plan {
 
     my $trailers = _fields($request, 'trailer');
     my $has_trailers = @$trailers ? 1 : 0;
+    $fields = _ensure_trailer_header($fields, $trailers)
+        if $has_trailers;
 
     _validate_connect_request(
         $request, $fields, $version, $body, $stream_body, $trailers,
@@ -1106,6 +1151,8 @@ sub response_plan {
         : ($REASON{$status} || '');
     my $fields = _fields($response, 'header');
     my $trailers = _fields($response, 'trailer');
+    $fields = _ensure_trailer_header($fields, $trailers)
+        if @$trailers;
     my $body = $response->has_buffered_body ? _bytes('response body', $response->body) : undef;
     croak 'stream_body cannot be combined with a buffered response body'
         if $stream_body && defined $body;
