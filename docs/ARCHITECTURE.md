@@ -78,6 +78,10 @@ The parser enforces security-sensitive rules before application delivery:
 - conflicting Content-Length values are rejected;
 - Transfer-Encoding and Content-Length cannot be combined;
 - chunked must be the final chunk coding;
+- outgoing TE is validated as HTTP/1.1 hop-by-hop negotiation and gains
+  Connection: TE automatically when needed;
+- TE never advertises chunked explicitly, because chunked is implicitly
+  acceptable in HTTP/1.1;
 - unsupported transfer codings are rejected;
 - configured head and field-count limits are finite.
 
@@ -101,6 +105,10 @@ caller-supplied body bytes are assumed to have any earlier transfer codings
 already applied, and Unblock adds only a final chunked layer when required.
 Unblock does not automatically encode or decode transfer codings such as gzip.
 
+A server only originates a non-chunked transfer coding when the request
+advertised that coding with a positive TE quality value and protected the TE
+field with Connection: TE. Chunked itself needs no TE advertisement.
+
 Transfer-Encoding plus Content-Length is rejected as ambiguous. input_eof()
 completes only a close-delimited body.
 
@@ -109,6 +117,12 @@ completes only a close-delimited body.
 picohttpparser's chunk decoder is configured to stop at the zero chunk before
 it consumes trailer fields. Unblock then parses the trailer section as a real
 HTTP field block and places those fields in the Uniform trailer section.
+
+When outgoing trailer fields are already known when the message head is
+planned, Unblock adds their names to Trailer automatically. If a streaming
+producer will add trailer names only after the head has been sent, the caller
+should predeclare those names in Trailer. The application remains responsible
+for choosing fields whose definitions permit trailer use.
 
 This intentionally improves on the old Linux::Event::HTTP native path, which
 could consume chunk trailers without exposing them.
