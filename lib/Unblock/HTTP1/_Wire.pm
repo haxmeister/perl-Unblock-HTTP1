@@ -3,7 +3,12 @@ package Unblock::HTTP1::_Wire;
 use strict;
 use warnings;
 use Carp qw(croak);
+use Config ();
 use utf8 ();
+
+my $MAX_CONTENT_LENGTH = $Config::Config{uvsize} >= 8
+    ? '18446744073709551615'
+    : '4294967295';
 
 my %REASON = (
     100 => 'Continue', 101 => 'Switching Protocols', 103 => 'Early Hints',
@@ -84,6 +89,17 @@ sub _content_length {
             $member =~ s/\A[ \t]+//;
             $member =~ s/[ \t]+\z//;
             croak 'invalid Content-Length' unless $member =~ /\A[0-9]+\z/;
+
+            # Compare decimal values, not their textual spelling. RFC 9112
+            # permits repeated or comma-combined values when every member has
+            # the same numeric value.
+            $member =~ s/\A0+(?=[0-9])//;
+
+            croak 'Content-Length exceeds supported framing range'
+                if length($member) > length($MAX_CONTENT_LENGTH)
+                || (length($member) == length($MAX_CONTENT_LENGTH)
+                    && $member gt $MAX_CONTENT_LENGTH);
+
             push @numbers, $member;
         }
     }
