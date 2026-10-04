@@ -990,8 +990,81 @@ sub _simple_request_plan {
     };
 }
 
+sub _simple_response_plan_portable {
+    my ($request, $response, $stream_body) = @_;
+    return if $stream_body;
+
+    my $request_version = $request->version;
+    $request_version = '1.1' unless defined $request_version;
+    return unless $request_version eq '1.1';
+
+    my $method = _method($request->method);
+    return if $method eq 'HEAD' || $method eq 'CONNECT';
+
+    my $request_connection = $request->header_values('Connection');
+    return unless defined($request_connection) && !@$request_connection;
+
+    my $response_version = $response->version;
+    return if defined($response_version) && $response_version ne '1.1';
+
+    my $status = _status_code($response->status);
+    return if $status < 200 || $status > 599
+        || $status == 204 || $status == 205 || $status == 304;
+
+    my $trailer_count = $response->trailer_count;
+    return unless defined($trailer_count) && $trailer_count == 0;
+
+    my $body;
+    if ($response->has_buffered_body) {
+        $body = _bytes('response body', $response->body);
+    } else {
+        $body = '';
+    }
+
+    my $reason_value = $response->reason;
+    my $reason = defined($reason_value)
+        ? _reason_phrase($reason_value)
+        : ($REASON{$status} || '');
+
+    my $count = $response->header_count;
+    return unless defined $count;
+
+    my $wire = 'HTTP/1.1 ' . sprintf('%03d', $status)
+        . ' ' . $reason . "\r\n";
+
+    for my $index (0 .. $count - 1) {
+        my $name = _field_name('header', $response->header_name($index));
+        my $value = _field_value('header', $response->header_value($index));
+        my $key = _lc($name);
+
+        return if $key eq 'content-length'
+            || $key eq 'transfer-encoding'
+            || $key eq 'connection';
+
+        $wire .= $name . ': ' . $value . "\r\n";
+    }
+
+    my $length = length($body);
+    $wire .= 'Content-Length: ' . $length . "\r\n\r\n" . $body;
+
+    return {
+        wire           => $wire,
+        version        => '1.1',
+        mode           => 'content-length',
+        remaining      => 0,
+        stream_body    => 0,
+        trailers       => [],
+        keep_alive     => 1,
+        close_after    => 0,
+        switch         => 0,
+        body_finalized => 1,
+    };
+}
+
 sub _simple_response_plan {
     my ($request, $response, $stream_body, $request_view, $response_view) = @_;
+    return _simple_response_plan_portable($request, $response, $stream_body)
+        unless $request_view || $response_view;
     return if $stream_body;
 
     my $request_version = $request_view
