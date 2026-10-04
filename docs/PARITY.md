@@ -72,7 +72,7 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Selected Upgrade protocols must have been offered by the request.
 - Upgrade request and response body/framing restrictions.
 - CONNECT authority-form target validation.
-- CONNECT Host must match the authority target.
+- CONNECT Host must identify the authority target host; its port may be omitted.
 - CONNECT request body/framing restrictions.
 - Successful CONNECT response restrictions on the server.
 - A client ignores Content-Length and Transfer-Encoding received on a
