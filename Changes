@@ -63,3 +63,7 @@ Revision history for Unblock-HTTP1
       qvalues, implicit chunked acceptance, and response-coding selection.
     - Known outgoing trailer names are announced automatically with Trailer
       while late streaming trailers can still be predeclared explicitly.
+    - Added a configurable cumulative chunk-extension budget in the vendored
+      native decoder, defaulting to 16384 bytes per chunked message.
+    - Engine constructors now reject unknown option names instead of silently
+      ignoring configuration typos.
