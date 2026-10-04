@@ -181,7 +181,10 @@ subtest 'server HEAD permits transfer-coding metadata' => sub {
         },
     );
     $server->input(
-        "HEAD / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n"
+        "HEAD / HTTP/1.1\r\n" .
+        "Host: example.test\r\n" .
+        "Connection: close, TE\r\n" .
+        "TE: gzip\r\n\r\n"
     );
     like(
         $server->output,
