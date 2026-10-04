@@ -80,6 +80,29 @@ sub _start_next {
     return;
 }
 
+sub _input_native_head {
+    my ($self, $head, $response) = @_;
+    croak '_input_native_head(): cannot be called recursively from an engine callback'
+        if $self->{driving};
+    return (4, 0) if $self->{switched};
+    return (3, 0) if $self->{closed};
+    croak '_input_native_head(): cannot mix native head input with buffered portable input'
+        if length $self->{input};
+    croak '_input_native_head(): response received with no outstanding request'
+        unless $self->{active};
+    croak '_input_native_head(): response body is already active'
+        if $self->{rx};
+
+    local $self->{borrowed_head} = $head;
+    local $self->{borrowed_message} = $response;
+    local $self->{native_head_preconsumed} = 1;
+    local $self->{driving} = 1;
+    $self->_drive;
+
+    my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
+    return ($status, $self->_borrowed_native_head_ready);
+}
+
 sub _drive {
     my ($self) = @_;
 
@@ -99,10 +122,14 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$rx) {
-            my ($input, $offset) = $self->_input_window;
-            my $head = Unblock::HTTP1::_Native->parse_response_head(
-                $input, 0, $self->{max_headers}, $offset,
-            );
+            my $head = delete $self->{borrowed_head};
+            my $response = delete $self->{borrowed_message};
+            if (!$head) {
+                my ($input, $offset) = $self->_input_window;
+                $head = Unblock::HTTP1::_Native->parse_response_head(
+                    $input, 0, $self->{max_headers}, $offset,
+                );
+            }
             if (!$head) {
                 return $self->_connection_error('HTTP/1 response head exceeds configured limit')
                     if $self->_input_length > $self->{max_head_size};
@@ -111,15 +138,18 @@ sub _drive {
             return $self->_connection_error($head->{error}) unless $head->{ok};
             return $self->_connection_error('HTTP/1 response head exceeds configured limit')
                 if $head->{consumed} > $self->{max_head_size};
-            $self->_input_discard($head->{consumed});
+            $self->_input_discard($head->{consumed})
+                unless $self->{native_head_preconsumed};
 
             my $informational =
                 $head->{status} >= 100 && $head->{status} < 200
                 && $head->{status} != 101 ? 1 : 0;
-            my $response =
-                Unblock::HTTP1::_Wire::_response_from_validated_head(
-                    $head, $informational,
-                );
+            if (!$response) {
+                $response =
+                    Unblock::HTTP1::_Wire::_response_from_validated_head(
+                        $head, $informational,
+                    );
+            }
 
             my $plan;
             my $ok = eval {
@@ -284,6 +314,15 @@ sub _drive {
         return $self->_connection_error('invalid HTTP/1 client receive state');
     }
     return;
+}
+
+sub _borrowed_native_head_ready {
+    my ($self) = @_;
+    return 0 if $self->{closed} || $self->{switched};
+    return 0 unless $self->{active};
+    return 0 if $self->{rx};
+    return 0 if length $self->{input};
+    return 1;
 }
 
 sub _finish_response {
