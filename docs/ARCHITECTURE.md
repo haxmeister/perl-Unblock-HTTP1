@@ -12,8 +12,8 @@ Unblock::HTTP1 is the reusable HTTP/1 protocol engine.
               v
      transport chosen by caller
 
-The transport can be Linux::Event, IO::Async, AnyEvent, Mojo, a blocking
-socket, an in-memory test harness, or any other reliable ordered byte stream.
+The transport can be an event loop, framework adapter, blocking socket,
+in-memory test harness, or any other reliable ordered byte stream.
 
 ## Byte boundary
 
@@ -59,12 +59,12 @@ message is marked complete and fully frozen.
 picohttpparser is an internal parsing backend. It handles hot lexical work,
 while Unblock owns HTTP semantics and connection state.
 
-The XS backend is intentionally independent of Linux::Event. It does not know
-about file descriptors, epoll, Stream objects, watcher callbacks, or the
-Linux::Event native consumer ABI.
+The XS backend is intentionally independent of transports and event loops. It
+does not know about file descriptors, readiness APIs, watcher objects, or
+framework-specific native consumer interfaces.
 
-Portable HTTP parsing and framing optimizations belong here. An optional
-Linux::Event transport bridge belongs in Linux::Event::HTTP.
+Portable HTTP parsing and framing optimizations belong here. Transport-specific
+bridges belong in adapters outside the protocol engine.
 
 ## Request framing
 
@@ -130,9 +130,6 @@ producer will add trailer names only after the head has been sent, the caller
 should predeclare those names in Trailer. The application remains responsible
 for choosing fields whose definitions permit trailer use.
 
-This intentionally improves on the old Linux::Event::HTTP native path, which
-could consume chunk trailers without exposing them.
-
 ## Streaming and backpressure
 
 A Transaction with stream_body => 1 accepts body chunks through write() and
@@ -176,20 +173,9 @@ input(), input_eof(), and output() are not recursively callable from an engine
 callback. Application callbacks may queue response data or body data through
 the Transaction API.
 
-## Linux::Event integration
-
-Linux::Event::HTTP should eventually own only Linux-specific surrounding
-policy and transport adaptation: Stream/listener creation, TLS/ALPN, readiness,
-connection pooling, redirects, cookies, authentication, proxy policy, protocol
-selection, and live Stream transition.
-
-It should not reimplement HTTP/1 parsing, framing, chunk decoding, trailers,
-persistence rules, or switch-boundary detection.
-
 ## Performance direction
 
 Correct portable semantics come first, but the architecture does not cap
 optimization there. The native parser already keeps lexical parsing in C.
-After behavior is stable, serialization and common receive transitions can
-move further into XS without changing the public API. Linux::Event can then
-add a direct native Stream-consumer bridge as an adapter optimization.
+Additional work should move into XS only when same-run benchmarks justify it,
+without changing the public API or coupling the engine to a transport.
