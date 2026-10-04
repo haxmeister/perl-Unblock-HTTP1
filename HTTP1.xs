@@ -428,8 +428,292 @@ strict_headers(const struct phr_header *headers, size_t count)
     return 1;
 }
 
+
+#define UB_HTTP1_INPUT_ABI_VERSION 1U
+#define UB_HTTP1_INPUT_OK 0
+#define UB_HTTP1_INPUT_MORE 1
+#define UB_HTTP1_INPUT_CLOSED 3
+#define UB_HTTP1_INPUT_SWITCH 4
+
+typedef struct {
+    const char *data;
+    size_t length;
+    size_t offset;
+    int valid;
+} ub_http1_borrowed_window;
+
+typedef struct {
+    SV *engine;
+    CV *input_cv;
+    CV *eof_cv;
+} ub_http1_input_context;
+
+typedef struct {
+    uint32_t abi_version;
+    size_t struct_size;
+    const char *name;
+    void *(*create)(pTHX_ SV *engine);
+    int (*input)(pTHX_ void *context, const char *data, size_t length,
+        size_t *consumed);
+    int (*eof)(pTHX_ void *context);
+    void (*destroy)(pTHX_ void *context);
+} ub_http1_input_ops_v1;
+
+static ub_http1_borrowed_window *
+ub_http1_window_from_sv(pTHX_ SV *sv)
+{
+    SV *inner;
+    ub_http1_borrowed_window *window;
+
+    if (!SvROK(sv)
+        || !sv_derived_from(sv, "Unblock::HTTP1::_Native::BorrowedWindow"))
+        croak("not an Unblock::HTTP1 borrowed input window");
+
+    inner = SvRV(sv);
+    window = INT2PTR(ub_http1_borrowed_window *, SvIV(inner));
+    if (window == NULL || !window->valid)
+        croak("borrowed input window is no longer valid");
+    if (window->offset > window->length)
+        croak("corrupt borrowed input window");
+    return window;
+}
+
+static const char *
+ub_http1_buffer_view(pTHX_ SV *buffer, STRLEN *length)
+{
+    if (SvROK(buffer)
+        && sv_derived_from(buffer, "Unblock::HTTP1::_Native::BorrowedWindow")) {
+        ub_http1_borrowed_window *window =
+            ub_http1_window_from_sv(aTHX_ buffer);
+        size_t remaining = window->length - window->offset;
+        if (remaining > (size_t)~(STRLEN)0)
+            croak("borrowed input window exceeds Perl string length range");
+        *length = (STRLEN)remaining;
+        return window->data + window->offset;
+    }
+
+    return SvPVbyte(buffer, *length);
+}
+
+static CV *
+ub_http1_engine_method_cv(
+    pTHX_
+    ub_http1_input_context *context,
+    CV **slot,
+    const char *name
+)
+{
+    GV *gv;
+    CV *cv;
+
+    if (*slot != NULL)
+        return *slot;
+
+    if (!SvROK(context->engine))
+        croak("Unblock::HTTP1 native input engine is not an object");
+
+    gv = gv_fetchmethod_autoload(SvSTASH(SvRV(context->engine)), name, 0);
+    if (gv == NULL || (cv = GvCV(gv)) == NULL)
+        croak("Unblock::HTTP1 native input method %s is unavailable", name);
+
+    *slot = (CV *)SvREFCNT_inc((SV *)cv);
+    return *slot;
+}
+
+static int
+ub_http1_call_engine_scalar(
+    pTHX_
+    ub_http1_input_context *context,
+    CV **slot,
+    const char *name,
+    SV *arg
+)
+{
+    CV *cv = ub_http1_engine_method_cv(aTHX_ context, slot, name);
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    if (arg != NULL)
+        XPUSHs(arg);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_SCALAR | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV))
+        error = newSVsv(ERRSV);
+    else if (count > 0)
+        result = POPi;
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
+static void *
+ub_http1_input_create(pTHX_ SV *engine)
+{
+    ub_http1_input_context *context;
+
+    if (!SvROK(engine)
+        || !sv_derived_from(engine, "Unblock::HTTP1::_Engine"))
+        return NULL;
+
+    Newxz(context, 1, ub_http1_input_context);
+    if (context == NULL)
+        return NULL;
+
+    context->engine = SvREFCNT_inc(engine);
+    return context;
+}
+
+static int
+ub_http1_input_borrowed(
+    pTHX_
+    void *opaque,
+    const char *data,
+    size_t length,
+    size_t *consumed
+)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+    ub_http1_borrowed_window *window;
+    SV *inner;
+    SV *object;
+    int result;
+
+    if (context == NULL || consumed == NULL)
+        croak("invalid Unblock::HTTP1 native input context");
+
+    *consumed = 0;
+    Newxz(window, 1, ub_http1_borrowed_window);
+    if (window == NULL)
+        croak("unable to allocate borrowed input window");
+
+    window->data = data != NULL ? data : "";
+    window->length = length;
+    window->offset = 0;
+    window->valid = 1;
+
+    inner = newSViv(PTR2IV(window));
+    object = newRV_noinc(inner);
+    sv_bless(object,
+        gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
+
+    result = ub_http1_call_engine_scalar(
+        aTHX_
+        context,
+        &context->input_cv,
+        "_input_borrowed",
+        object
+    );
+
+    *consumed = window->offset;
+    window->valid = 0;
+    SvREFCNT_dec(object);
+
+    if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
+        || result == 2)
+        croak("Unblock::HTTP1 engine returned invalid native input status");
+
+    return result;
+}
+
+static int
+ub_http1_input_eof(pTHX_ void *opaque)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+    int result;
+
+    if (context == NULL)
+        croak("invalid Unblock::HTTP1 native input context");
+
+    result = ub_http1_call_engine_scalar(
+        aTHX_
+        context,
+        &context->eof_cv,
+        "_borrowed_input_eof",
+        NULL
+    );
+
+    if (result != UB_HTTP1_INPUT_OK
+        && result != UB_HTTP1_INPUT_CLOSED
+        && result != UB_HTTP1_INPUT_SWITCH)
+        croak("Unblock::HTTP1 engine returned invalid native EOF status");
+
+    return result;
+}
+
+static void
+ub_http1_input_destroy(pTHX_ void *opaque)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+
+    PERL_UNUSED_CONTEXT;
+    if (context == NULL)
+        return;
+
+    if (context->input_cv != NULL)
+        SvREFCNT_dec((SV *)context->input_cv);
+    if (context->eof_cv != NULL)
+        SvREFCNT_dec((SV *)context->eof_cv);
+    if (context->engine != NULL)
+        SvREFCNT_dec(context->engine);
+    Safefree(context);
+}
+
+static const ub_http1_input_ops_v1 ub_http1_input_ops = {
+    UB_HTTP1_INPUT_ABI_VERSION,
+    sizeof(ub_http1_input_ops_v1),
+    "Unblock::HTTP1 borrowed input",
+    ub_http1_input_create,
+    ub_http1_input_borrowed,
+    ub_http1_input_eof,
+    ub_http1_input_destroy
+};
+
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native
 PROTOTYPES: DISABLE
+
+UV
+_borrowed_input_operations_address()
+  CODE:
+    RETVAL = PTR2UV(&ub_http1_input_ops);
+  OUTPUT:
+    RETVAL
+
+void
+_borrowed_input_once(engine, buffer)
+    SV *engine
+    SV *buffer
+  PREINIT:
+    STRLEN buffer_len;
+    const char *data;
+    void *context;
+    size_t consumed = 0;
+    int status;
+  PPCODE:
+    data = SvPVbyte(buffer, buffer_len);
+    context = ub_http1_input_create(aTHX_ engine);
+    if (context == NULL)
+        croak("engine does not support Unblock::HTTP1 native input");
+    status = ub_http1_input_borrowed(
+        aTHX_ context, data, (size_t)buffer_len, &consumed
+    );
+    ub_http1_input_destroy(aTHX_ context);
+    XPUSHs(sv_2mortal(newSViv(status)));
+    XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
 
 const char *
 pico_version(CLASS)
@@ -714,6 +998,99 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
   OUTPUT:
     RETVAL
 
+MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedWindow
+
+UV
+remaining(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    RETVAL = (UV)(window->length - window->offset);
+  OUTPUT:
+    RETVAL
+
+UV
+consumed(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    RETVAL = (UV)window->offset;
+  OUTPUT:
+    RETVAL
+
+SV *
+take(self, length)
+    SV *self
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    if (length > (UV)remaining)
+        croak("borrowed input take exceeds remaining window");
+    RETVAL = newSVpvn(window->data + window->offset, (STRLEN)length);
+    window->offset += (size_t)length;
+  OUTPUT:
+    RETVAL
+
+void
+discard(self, length)
+    SV *self
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    if (length > (UV)remaining)
+        croak("borrowed input discard exceeds remaining window");
+    window->offset += (size_t)length;
+
+void
+clear(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    window->offset = window->length;
+
+SV *
+remaining_bytes(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    RETVAL = newSVpvn(window->data + window->offset, (STRLEN)remaining);
+  OUTPUT:
+    RETVAL
+
+void
+DESTROY(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_borrowed_window *window;
+  CODE:
+    if (!SvROK(self))
+        XSRETURN_EMPTY;
+    inner = SvRV(self);
+    window = INT2PTR(ub_http1_borrowed_window *, SvIV(inner));
+    if (window == NULL)
+        XSRETURN_EMPTY;
+    Safefree(window);
+    sv_setiv(inner, 0);
+
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::Chunked
 
 SV *
@@ -758,7 +1135,7 @@ feed(self, input, emit = 1, offset = 0)
     inner = SvRV(self);
     decoder = INT2PTR(struct phr_chunked_decoder *, SvIV(inner));
     if (!decoder) croak("chunked decoder has already been released");
-    input_bytes = SvPVbyte(input, input_len);
+    input_bytes = ub_http1_buffer_view(aTHX_ input, &input_len);
     if (offset > (UV)input_len)
         croak("offset exceeds input length");
     input_bytes += (size_t)offset;
