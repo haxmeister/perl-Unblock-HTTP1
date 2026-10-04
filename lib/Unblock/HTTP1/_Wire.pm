@@ -140,6 +140,36 @@ sub _authority_form {
     return "$host:$port";
 }
 
+sub _validate_request_target {
+    my ($method, $target) = @_;
+    $method = _bytes('request method', $method);
+    $target = _bytes('request target', $target);
+
+    croak 'HTTP/1 request target must not contain a fragment'
+        if index($target, '#') >= 0;
+
+    if ($target eq '*') {
+        croak 'HTTP/1 asterisk request target is only valid for OPTIONS'
+            unless $method eq 'OPTIONS';
+        return $target;
+    }
+
+    if ($method eq 'CONNECT') {
+        _authority_form($target);
+        return $target;
+    }
+
+    return $target if substr($target, 0, 1) eq '/';
+
+    # absolute-form begins with a URI scheme. URI interpretation and proxy
+    # routing remain above this protocol engine; only the wire form is checked.
+    return $target
+        if $target =~ /\A[A-Za-z][A-Za-z0-9+.-]*:[^#]*\z/;
+
+    croak 'HTTP/1 request target must use origin-form, absolute-form, '
+        . 'CONNECT authority-form, or OPTIONS asterisk-form';
+}
+
 sub _upgrade_tokens {
     my ($where, $fields) = @_;
     my @token;
@@ -290,6 +320,7 @@ sub _simple_request_plan {
     return unless defined($trailer_count) && $trailer_count == 0;
 
     my $target = _bytes('request target', $request->target);
+    _validate_request_target($method, $target);
     my $count = $request->header_count;
     return unless defined $count;
 
@@ -436,6 +467,7 @@ sub request_plan {
     my $version = _version($request, '1.1');
     my $method = _bytes('request method', $request->method);
     my $target = _bytes('request target', $request->target);
+    _validate_request_target($method, $target);
     my $fields = _fields($request, 'header');
     my $body = $request->has_buffered_body ? _bytes('request body', $request->body) : undef;
     croak 'stream_body cannot be combined with a buffered request body'
