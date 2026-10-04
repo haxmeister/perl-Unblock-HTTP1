@@ -257,41 +257,48 @@ sub _parse_transfer_coding_member {
     return $coding;
 }
 
+sub _split_quoted_delimiter {
+    my ($value, $delimiter, $label) = @_;
+    my @member;
+    my $start = 0;
+    my $quoted = 0;
+    my $escaped = 0;
+    my $len = length $value;
+
+    for my $pos (0 .. $len - 1) {
+        my $ch = substr($value, $pos, 1);
+        if ($escaped) {
+            $escaped = 0;
+            next;
+        }
+        if ($quoted && $ch eq '\\') {
+            $escaped = 1;
+            next;
+        }
+        if ($ch eq '"') {
+            $quoted = !$quoted;
+            next;
+        }
+        next unless $ch eq $delimiter && !$quoted;
+        push @member, substr($value, $start, $pos - $start);
+        $start = $pos + 1;
+    }
+
+    croak "unterminated $label quoted parameter"
+        if $quoted || $escaped;
+    push @member, substr($value, $start);
+    return @member;
+}
+
 sub _response_transfer_encoding {
     my ($fields) = @_;
     my @coding;
 
     for my $value (@{ _values($fields, 'Transfer-Encoding') }) {
-        my @member;
-        my $start = 0;
-        my $quoted = 0;
-        my $escaped = 0;
-        my $len = length $value;
-
-        for my $pos (0 .. $len - 1) {
-            my $ch = substr($value, $pos, 1);
-            if ($escaped) {
-                $escaped = 0;
-                next;
-            }
-            if ($quoted && $ch eq '\\') {
-                $escaped = 1;
-                next;
-            }
-            if ($ch eq '"') {
-                $quoted = !$quoted;
-                next;
-            }
-            next unless $ch eq ',' && !$quoted;
-            push @member, substr($value, $start, $pos - $start);
-            $start = $pos + 1;
-        }
-
-        croak 'unterminated Transfer-Encoding quoted parameter'
-            if $quoted || $escaped;
-        push @member, substr($value, $start);
-
-        push @coding, map { _parse_transfer_coding_member($_) } @member;
+        my @member = _split_quoted_delimiter(
+            $value, ',', 'Transfer-Encoding',
+        );
+        push @coding, map { scalar _parse_transfer_coding_member($_) } @member;
     }
 
     my $chunked = grep { $_ eq 'chunked' } @coding;
@@ -301,6 +308,78 @@ sub _response_transfer_encoding {
     return \@coding;
 }
 
+
+sub _qvalue_thousandths {
+    my ($value) = @_;
+    $value = _trim($value);
+
+    if ($value =~ /\A0(?:\.([0-9]{0,3}))?\z/) {
+        my $fraction = defined($1) ? $1 : '';
+        return 0 if $fraction eq '';
+        return 0 + ($fraction . ('0' x (3 - length($fraction))));
+    }
+    if ($value =~ /\A1(?:\.(0{0,3}))?\z/) {
+        return 1000;
+    }
+    croak 'invalid TE qvalue';
+}
+
+sub _request_te_preferences {
+    my ($fields) = @_;
+    my $values = _values($fields, 'TE');
+    my %quality;
+    my $trailers = 0;
+
+    for my $value (@$values) {
+        next if _trim($value) eq '';
+
+        for my $member (_split_quoted_delimiter($value, ',', 'TE')) {
+            $member = _trim($member);
+            croak 'invalid TE field value' unless length $member;
+
+            if (_lc($member) eq 'trailers') {
+                $trailers = 1;
+                next;
+            }
+
+            my $coding = scalar _parse_transfer_coding_member($member);
+            croak 'TE must not list the chunked transfer coding'
+                if $coding eq 'chunked';
+            croak 'trailers TE keyword must not have parameters'
+                if $coding eq 'trailers';
+
+            my @part = _split_quoted_delimiter($member, ';', 'TE');
+            shift @part;
+            my $rank = 1000;
+            my $seen_q = 0;
+
+            for my $index (0 .. $#part) {
+                my $parameter = _trim($part[$index]);
+                my ($name, $value) = $parameter =~
+                    /\A([!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+)[ \t]*=[ \t]*(.+)\z/s;
+                croak 'invalid TE parameter' unless defined $name;
+
+                next unless _lc($name) eq 'q';
+                croak 'TE qvalue must be the final parameter'
+                    if $index != $#part;
+                croak 'TE must not contain more than one qvalue'
+                    if $seen_q++;
+                croak 'TE qvalue must not be quoted'
+                    if substr($value, 0, 1) eq '"';
+                $rank = _qvalue_thousandths($value);
+            }
+
+            $quality{$coding} = $rank
+                if !exists($quality{$coding}) || $rank > $quality{$coding};
+        }
+    }
+
+    return {
+        present  => @$values ? 1 : 0,
+        trailers => $trailers,
+        quality  => \%quality,
+    };
+}
 
 sub _trim {
     my ($value) = @_;
@@ -585,6 +664,24 @@ sub _append_transfer_coding {
     return \@out;
 }
 
+sub _append_connection_token {
+    my ($fields, $token) = @_;
+    my @out = map { [ @$_ ] } @$fields;
+
+    for (my $i = $#out; $i >= 0; --$i) {
+        next unless _lc($out[$i][0]) eq 'connection';
+        if (length _trim($out[$i][1])) {
+            $out[$i][1] .= ', ' . $token;
+        } else {
+            $out[$i][1] = $token;
+        }
+        return \@out;
+    }
+
+    push @out, [ 'Connection', $token ];
+    return \@out;
+}
+
 sub _serialize_fields {
     my ($fields) = @_;
     my $wire = '';
@@ -658,7 +755,8 @@ sub _simple_request_plan {
             || $key eq 'transfer-encoding'
             || $key eq 'connection'
             || $key eq 'upgrade'
-            || $key eq 'expect';
+            || $key eq 'expect'
+            || $key eq 'te';
 
         $wire .= $name . ': ' . $value . "\r\n";
     }
@@ -813,6 +911,15 @@ sub request_plan {
     }
 
     _validate_host_value($_) for @{ _values($fields, 'Host') };
+
+    my $te_preferences = _request_te_preferences($fields);
+    if ($te_preferences->{present}) {
+        croak 'HTTP/1.0 request cannot send TE'
+            if $version eq '1.0';
+        my $connection = _connection_tokens($fields);
+        $fields = _append_connection_token($fields, 'TE')
+            unless $connection->{te};
+    }
 
     my $cl = _content_length($fields);
     my $te = _transfer_encoding($fields);
@@ -1046,6 +1153,20 @@ sub response_plan {
     my $te = _response_transfer_encoding($fields);
     croak 'response cannot contain both Transfer-Encoding and Content-Length'
         if !$connect_switch && @$te && defined $cl;
+
+    if (grep { $_ ne 'chunked' } @$te) {
+        my $request_fields = _fields($request, 'header');
+        my $request_connection = _connection_tokens($request_fields);
+        my $preferences = _request_te_preferences($request_fields);
+
+        for my $coding (grep { $_ ne 'chunked' } @$te) {
+            my $quality = $preferences->{quality}{$coding} || 0;
+            croak "response transfer coding was not accepted by request TE: $coding"
+                unless $preferences->{present}
+                    && $request_connection->{te}
+                    && $quality > 0;
+        }
+    }
 
     if ($connect_switch) {
         croak 'successful CONNECT response must not contain Content-Length'
