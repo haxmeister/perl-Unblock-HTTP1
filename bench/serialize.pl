@@ -79,6 +79,15 @@ cmpthese(
             my $te = Unblock::HTTP1::_Wire::_transfer_encoding($response_fields);
             die if defined($cl) || @$te;
         },
+        response_receive_plan => sub {
+            my $plan = Unblock::HTTP1::_Wire::response_receive_plan(
+                $request,
+                $response_head,
+            );
+            die unless $plan->{mode} eq 'content-length'
+                && $plan->{remaining} == 5
+                && $plan->{keep_alive};
+        },
         request_assemble => sub {
             my $wire =
                 "GET /hello?x=1 HTTP/1.1\r\n" .
