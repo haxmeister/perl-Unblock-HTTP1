@@ -266,6 +266,25 @@ sub _trim {
     return $value;
 }
 
+sub _validate_host_value {
+    my ($value) = @_;
+    $value = _bytes('Host field', $value);
+    return 1 if $value eq '';
+
+    croak 'invalid Host field'
+        if $value =~ /[\x00-\x20\x7f\/?#@]/;
+
+    if (substr($value, 0, 1) eq '[') {
+        croak 'invalid Host field'
+            unless $value =~ /\A\[[^\]]+\](?::[0-9]+)?\z/;
+        return 1;
+    }
+
+    croak 'invalid Host field'
+        unless $value =~ /\A[^:]+(?::[0-9]+)?\z/;
+    return 1;
+}
+
 sub _authority_form {
     my ($target) = @_;
     $target = _bytes('CONNECT target', $target);
@@ -690,6 +709,8 @@ sub request_plan {
             unless defined $authority;
         $fields = [ @$fields, [ 'Host', _bytes('request authority', $authority) ] ];
     }
+
+    _validate_host_value($_) for @{ _values($fields, 'Host') };
 
     my $cl = _content_length($fields);
     my $te = _transfer_encoding($fields);
