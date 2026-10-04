@@ -153,7 +153,7 @@ sub _drive {
                     forbid_content => $plan->{forbid_content} ? 1 : 0,
                 };
                 if ($rx->{mode} eq 'chunked') {
-                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
+                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new($self->{max_chunk_extension_size});
                 }
             }
 
