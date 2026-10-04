@@ -38,6 +38,38 @@ sub _bytes {
     return $copy;
 }
 
+sub _method {
+    my ($value) = @_;
+    $value = _bytes('request method', $value);
+    croak 'request method must be an HTTP token'
+        unless $value =~ /\A[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/;
+    return $value;
+}
+
+sub _field_name {
+    my ($section, $value) = @_;
+    $value = _bytes("$section name", $value);
+    croak "invalid $section field name"
+        unless $value =~ /\A[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/;
+    return $value;
+}
+
+sub _field_value {
+    my ($section, $value) = @_;
+    $value = _bytes("$section value", $value);
+    croak "invalid $section field value"
+        if $value =~ /[\x00-\x08\x0a-\x1f\x7f]/;
+    return $value;
+}
+
+sub _reason_phrase {
+    my ($value) = @_;
+    $value = _bytes('response reason', $value);
+    croak 'invalid HTTP/1 response reason phrase'
+        if $value =~ /[\x00-\x08\x0a-\x1f\x7f]/;
+    return $value;
+}
+
 sub _lc {
     my ($value) = @_;
     $value =~ tr/A-Z/a-z/;
@@ -54,8 +86,8 @@ sub _fields {
     my @fields;
     for my $i (0 .. $count - 1) {
         push @fields, [
-            _bytes("$section name", $message->$name_method($i)),
-            _bytes("$section value", $message->$value_method($i)),
+            _field_name($section, $message->$name_method($i)),
+            _field_value($section, $message->$value_method($i)),
         ];
     }
     return \@fields;
@@ -324,7 +356,7 @@ sub _connect_host {
 
 sub _validate_request_target {
     my ($method, $target) = @_;
-    $method = _bytes('request method', $method);
+    $method = _method($method);
     $target = _bytes('request target', $target);
 
     croak 'HTTP/1 request target must not contain whitespace or control bytes'
@@ -536,7 +568,7 @@ sub _simple_request_plan {
     $version = '1.1' unless defined $version;
     return unless $version eq '1.1';
 
-    my $method = _bytes('request method', $request->method);
+    my $method = _method($request->method);
     return if $method eq 'CONNECT';
 
     if ($request->can('protocol')) {
@@ -561,8 +593,8 @@ sub _simple_request_plan {
     my $host_count = 0;
 
     for my $index (0 .. $count - 1) {
-        my $name = _bytes('header name', $request->header_name($index));
-        my $value = _bytes('header value', $request->header_value($index));
+        my $name = _field_name('header', $request->header_name($index));
+        my $value = _field_value('header', $request->header_value($index));
         my $key = _lc($name);
 
         if ($key eq 'host') {
@@ -624,7 +656,7 @@ sub _simple_response_plan {
     $request_version = '1.1' unless defined $request_version;
     return unless $request_version eq '1.1';
 
-    my $method = _bytes('request method', $request->method);
+    my $method = _method($request->method);
     return if $method eq 'HEAD' || $method eq 'CONNECT';
 
     # Any explicit connection option can change persistence semantics.
@@ -650,7 +682,7 @@ sub _simple_response_plan {
 
     my $reason_value = $response->reason;
     my $reason = defined($reason_value)
-        ? _bytes('response reason', $reason_value)
+        ? _reason_phrase($reason_value)
         : ($REASON{$status} || '');
 
     my $count = $response->header_count;
@@ -660,8 +692,8 @@ sub _simple_response_plan {
         . ' ' . $reason . "\r\n";
 
     for my $index (0 .. $count - 1) {
-        my $name = _bytes('header name', $response->header_name($index));
-        my $value = _bytes('header value', $response->header_value($index));
+        my $name = _field_name('header', $response->header_name($index));
+        my $value = _field_value('header', $response->header_value($index));
         my $key = _lc($name);
 
         # Explicit framing or persistence belongs to the complete planner.
@@ -703,7 +735,7 @@ sub request_plan {
     }
 
     my $version = _version($request, '1.1');
-    my $method = _bytes('request method', $request->method);
+    my $method = _method($request->method);
     my $target = _bytes('request target', $request->target);
     _validate_request_target($method, $target);
     my $fields = _fields($request, 'header');
@@ -913,7 +945,7 @@ sub response_plan {
     }
 
     my $status = $response->status;
-    my $reason = defined($response->reason) ? _bytes('response reason', $response->reason)
+    my $reason = defined($response->reason) ? _reason_phrase($response->reason)
         : ($REASON{$status} || '');
     my $fields = _fields($response, 'header');
     my $trailers = _fields($response, 'trailer');
