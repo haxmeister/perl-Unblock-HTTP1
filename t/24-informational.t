@@ -32,4 +32,39 @@ $server->input($client->output);
 $client->input($server->output);
 is_deeply(\@status, [103, 200], 'informational response precedes final response');
 
+
+subtest 'respond rejects non-101 informational status' => sub {
+    my $respond_error;
+    my $server = Unblock::HTTP1::Server->new(
+        on_request => sub {
+            my ($tx) = @_;
+            my $ok = eval {
+                $tx->respond(Uniform::HTTP::Response->new(status => 103));
+                1;
+            };
+            $respond_error = $@ unless $ok;
+
+            $tx->respond(Uniform::HTTP::Response->new(
+                status => 200,
+                body   => 'ok',
+            ));
+        },
+    );
+
+    $server->input(
+        "GET / HTTP/1.1\r\nHost: example.test\r\n\r\n"
+    );
+
+    like(
+        $respond_error,
+        qr/informational status must use send_informational/,
+        'respond explains the informational API boundary',
+    );
+    is(
+        $server->output,
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        'only the final response reaches the wire',
+    );
+};
+
 done_testing;
