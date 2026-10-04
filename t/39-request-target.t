@@ -45,6 +45,14 @@ subtest 'received CONNECT request target and framing are strict' => sub {
     ok($host_without_port->{ok},
         'CONNECT Host may omit the port carried by authority-form');
 
+    my $zero_length = parse(
+        "CONNECT example.test:443 HTTP/1.1\r\n" .
+        "Host: example.test:443\r\nContent-Length: 0\r\n\r\n"
+    );
+    ok($zero_length->{ok}, 'zero Content-Length CONNECT is accepted');
+    is($zero_length->{body_mode}, 'none',
+        'zero Content-Length CONNECT remains bodyless');
+
     my @bad = (
         [
             'origin-form CONNECT target',
@@ -67,9 +75,9 @@ subtest 'received CONNECT request target and framing are strict' => sub {
             "CONNECT example.test:65536 HTTP/1.1\r\nHost: example.test:65536\r\n\r\n",
         ],
         [
-            'CONNECT Content-Length',
+            'CONNECT nonzero Content-Length',
             "CONNECT example.test:443 HTTP/1.1\r\n" .
-            "Host: example.test:443\r\nContent-Length: 0\r\n\r\n",
+            "Host: example.test:443\r\nContent-Length: 1\r\n\r\n",
         ],
         [
             'CONNECT Transfer-Encoding',
