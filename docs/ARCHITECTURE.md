@@ -69,10 +69,10 @@ window and Unblock reports the consumed prefix. Parser state and HTTP lifecycle
 remain in this distribution; a framework bridge only moves bytes and maps the
 ABI result to its own read/pause/switch behavior.
 
-When Uniform::HTTP 0.06 is available, the native receive path constructs exact
-canonical Uniform requests directly from validated parser byte spans through
-Uniform's installed native FastPath header. The final request owns its copied
-Perl storage; no parser pointer or transport buffer is retained by the message.
+The native receive path constructs exact canonical Uniform requests and
+responses directly from validated parser byte spans through the Uniform::HTTP
+0.06 native FastPath header. The final message owns its copied Perl storage; no
+parser pointer or transport buffer is retained by the message.
 
 Portable HTTP parsing and framing optimizations belong here. Transport-specific
 bridges belong in adapters outside the protocol engine.
