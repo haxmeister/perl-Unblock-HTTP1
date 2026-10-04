@@ -509,6 +509,9 @@ sub response_plan {
         if $status == 205 && $stream_body;
 
     my $cl = _content_length($fields);
+    croak '205 response Content-Length must be zero'
+        if $status == 205 && defined($cl) && $cl != 0;
+
     my $metadata_only_framing = $head_only || $status == 304 ? 1 : 0;
     my $raw_te = _values($fields, 'Transfer-Encoding');
     my $te = $metadata_only_framing
