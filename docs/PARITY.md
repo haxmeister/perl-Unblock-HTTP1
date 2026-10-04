@@ -173,28 +173,30 @@ Current standalone measurements show:
 Absolute benchmark rates vary with the CI runner. Same-run ratios are the
 useful development signal.
 
-## Remaining before Linux::Event integration
+## Ready for Linux::Event integration
 
-The remaining work is now primarily performance and integration work:
+The portable HTTP/1 engine has completed its planned protocol-parity,
+cross-platform, security-hardening, and benchmark passes.
 
-1. keep the cross-platform parity matrix green while optimization continues;
-2. compare the hot paths against the current Linux::Event::HTTP native HTTP/1
-   implementation;
-3. evaluate the trusted Uniform construction requirements in
-   docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change;
-4. keep the Linux::Event adapter/bridge boundary in
-   docs/LINUX_EVENT_BRIDGE.md without making Linux-specific behavior part of
-   the portable Unblock API;
-5. move additional work into XS only where new same-run benchmarks justify it;
-6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
-   existing HTTP/1 suite unchanged where practical.
+The direct receive-path comparison with Linux::Event::HTTP is complete. It
+shows that native parsing is already fast and that repeated Uniform message
+construction is the clearest remaining receive-side cost. No additional XS
+migration is currently justified by the standalone measurements.
 
-The callback/lifecycle profiling pass is complete and does not justify
-weakening callback exception handling or moving finalization methods into XS.
+The Linux::Event adapter contract is defined in docs/LINUX_EVENT_BRIDGE.md.
+The canonical integration should use the public byte API first. A native
+Stream-consumer bridge remains optional and should only be added if end-to-end
+Linux::Event integration benchmarks show that byte movement or adapter dispatch
+is material.
 
-The trusted Uniform construction requirements are documented in
-docs/TRUSTED_UNIFORM.md. The Linux::Event adapter contract is documented in
-docs/LINUX_EVENT_BRIDGE.md.
+Two items remain outside this repository's portable protocol work:
 
-The Linux::Event adapter must remain an optimization and transport binding.
-Protocol correctness must continue to be testable entirely in memory here.
+1. Decide separately whether the measured trusted-construction opportunity
+   justifies a sanctioned Uniform::HTTP API change. Unblock::HTTP1 is correct
+   without that optimization and must not depend on undocumented Uniform object
+   layout.
+2. Integrate Linux::Event::HTTP against the public Unblock::HTTP1 engine and
+   rerun its HTTP/1 suite and end-to-end benchmarks in that repository.
+
+The cross-platform test and benchmark workflows on main should remain green
+while those integration steps proceed.
