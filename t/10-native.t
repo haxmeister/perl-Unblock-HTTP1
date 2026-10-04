@@ -50,6 +50,21 @@ ok($done, 'chunked decoder stops at zero chunk');
 is($decoded, 'Wiki', 'chunked payload decoded');
 is($left, "X-End: yes\r\n\r\nNEXT", 'trailer block remains visible to engine');
 
+for my $bad_chunk (
+    "4\nWiki\r\n0\r\n\r\n",
+    "4\r\nWiki\n0\r\n\r\n",
+    "0\n\r\n",
+) {
+    my $strict = Unblock::HTTP1::_Native::Chunked->new;
+    my $ok = eval {
+        $strict->feed($bad_chunk, 1);
+        1;
+    };
+    ok(!$ok, 'bare-LF chunk framing is rejected');
+    like($@, qr/malformed HTTP\/1 chunked body/,
+        'chunk framing error is explicit');
+}
+
 my $trailers = Unblock::HTTP1::_Native->parse_trailers($left);
 ok($trailers->{ok}, 'trailer block parses separately');
 is_deeply($trailers->{headers}, [ [ 'X-End', 'yes' ] ], 'trailer field retained');
