@@ -2,6 +2,8 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #include "vendor/picohttpparser/picohttpparser.c"
 
@@ -666,9 +668,23 @@ ub_http1_input_borrowed(
     sv_bless(object,
         gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
 
-    result = ub_http1_call_engine_input(
-        aTHX_ context, object, length, consumed
-    );
+    {
+        int jump_status;
+        dJMPENV;
+
+        JMPENV_PUSH(jump_status);
+        if (jump_status == 0) {
+            result = ub_http1_call_engine_input(
+                aTHX_ context, object, length, consumed
+            );
+            JMPENV_POP;
+        } else {
+            JMPENV_POP;
+            window->valid = 0;
+            SvREFCNT_dec(object);
+            JMPENV_JUMP(jump_status);
+        }
+    }
 
     window->valid = 0;
     SvREFCNT_dec(object);
