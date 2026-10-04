@@ -47,6 +47,11 @@ send Unblock output through the TLS transport.
 
 ## Linux::Event
 
-A basic Linux::Event adapter can use the same byte methods as any other host.
+A basic Linux::Event adapter uses the same byte methods as any other host.
+That public-byte adapter is the correctness reference.
+
 A later optimized adapter may bridge Linux::Event's native Stream consumer ABI
-directly to Unblock native primitives. That bridge is an optimization only.
+only when end-to-end measurements justify it. The bridge must remain an
+optimization rather than a second HTTP/1 implementation.
+
+See LINUX_EVENT_BRIDGE.md for the detailed integration contract.
