@@ -710,6 +710,130 @@ ub_http1_parse_request_head_result(
     return newRV_noinc((SV *)hv);
 }
 
+static SV *
+ub_http1_parse_response_head_result(
+    pTHX_
+    const char *buf,
+    size_t buffer_len,
+    size_t last_len,
+    size_t max_headers,
+    const uhttp_native_api *uniform_api,
+    SV **response_out
+)
+{
+    int minor;
+    int status;
+    const char *reason;
+    size_t reason_len;
+    struct phr_header headers[UB_HTTP1_MAX_HEADERS];
+    uhttp_native_field native_headers[UB_HTTP1_MAX_HEADERS];
+    size_t count;
+    int consumed;
+    size_t i;
+    char version_bytes[3];
+    SV *native_response = NULL;
+    HV *hv;
+    AV *list;
+
+    if (response_out != NULL)
+        *response_out = NULL;
+    if (last_len > buffer_len)
+        croak("last_len exceeds input window length");
+    if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
+        croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
+
+    count = max_headers;
+    consumed = phr_parse_response(
+        buf, buffer_len, &minor, &status,
+        &reason, &reason_len, headers, &count, last_len
+    );
+
+    if (consumed == -2)
+        return NULL;
+
+    if (consumed == -1 || minor < 0 || minor > 9
+        || status < 100 || status > 599
+        || buffer_len < 13 || !memEQ(buf, "HTTP/1.", 7)
+        || buf[7] < '0' || buf[7] > '9' || buf[8] != ' '
+        || buf[9] < '0' || buf[9] > '9'
+        || buf[10] < '0' || buf[10] > '9'
+        || buf[11] < '0' || buf[11] > '9' || buf[12] != ' '
+        || reason != buf + 13
+        || !valid_field_value(reason, reason_len)
+        || !strict_headers(headers, count)) {
+        return new_error_result(aTHX_ 0, "malformed HTTP/1 response");
+    }
+
+    if (uniform_api != NULL && response_out != NULL) {
+        uhttp_native_input input;
+        int informational =
+            status >= 100 && status < 200 && status != 101 ? 1 : 0;
+
+        uhttp_native_input_init(&input, UHTTP_KIND_RESPONSE);
+        input.flags =
+            UHTTP_HEADERS_LOSSLESS
+            | UHTTP_TRAILERS_LOSSLESS;
+
+        if (informational) {
+            input.flags |= UHTTP_COMPLETE;
+        } else {
+            input.flags |=
+                UHTTP_MUTABLE
+                | UHTTP_BODY_MUTABLE
+                | UHTTP_TRAILERS_MUTABLE;
+        }
+
+        version_bytes[0] = '1';
+        version_bytes[1] = '.';
+        version_bytes[2] = (char)('0' + minor);
+        input.version.data = version_bytes;
+        input.version.len = 3;
+        input.status = (IV)status;
+        input.reason.data = reason;
+        input.reason.len = (STRLEN)reason_len;
+
+        for (i = 0; i < count; ++i) {
+            const char *value = headers[i].value;
+            size_t value_len = headers[i].value_len;
+
+            while (value_len && is_ows((unsigned char)*value)) {
+                ++value;
+                --value_len;
+            }
+            while (value_len
+                && is_ows((unsigned char)value[value_len - 1]))
+                --value_len;
+
+            native_headers[i].name.data = headers[i].name;
+            native_headers[i].name.len = (STRLEN)headers[i].name_len;
+            native_headers[i].value.data = value;
+            native_headers[i].value.len = (STRLEN)value_len;
+        }
+
+        input.headers = native_headers;
+        input.header_count = (Size_t)count;
+        native_response = uhttp_native_from_validated(
+            aTHX_ uniform_api, &input, UHTTP_NATIVE_TRUSTED
+        );
+        *response_out = native_response;
+    }
+
+    hv = newHV();
+    hv_store(hv, "ok", 2, newSViv(1), 0);
+    hv_store(hv, "consumed", 8, newSViv(consumed), 0);
+    hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
+    hv_store(hv, "status", 6, newSViv(status), 0);
+    if (native_response == NULL)
+        hv_store(
+            hv, "reason", 6,
+            newSVpvn(reason, (STRLEN)reason_len), 0
+        );
+    list = headers_to_av(aTHX_ headers, count);
+    hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+
+    return newRV_noinc((SV *)hv);
+}
+
 #define UB_HTTP1_INPUT_ABI_VERSION 1U
 #define UB_HTTP1_INPUT_OK 0
 #define UB_HTTP1_INPUT_MORE 1
@@ -856,7 +980,7 @@ ub_http1_call_engine_input(
     SV *window,
     size_t length,
     SV *head,
-    SV *request,
+    SV *message,
     size_t *consumed,
     int *head_ready
 )
@@ -881,7 +1005,7 @@ ub_http1_call_engine_input(
     XPUSHs(window);
     mPUSHu((UV)length);
     XPUSHs(head != NULL ? head : &PL_sv_undef);
-    XPUSHs(request != NULL ? request : &PL_sv_undef);
+    XPUSHs(message != NULL ? message : &PL_sv_undef);
     PUTBACK;
     count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
     SPAGAIN;
@@ -917,7 +1041,7 @@ ub_http1_call_engine_head(
     pTHX_
     ub_http1_input_context *context,
     SV *head,
-    SV *request,
+    SV *message,
     int *head_ready
 )
 {
@@ -937,7 +1061,7 @@ ub_http1_call_engine_head(
     PUSHMARK(SP);
     XPUSHs(context->engine);
     XPUSHs(head);
-    XPUSHs(request != NULL ? request : &PL_sv_undef);
+    XPUSHs(message != NULL ? message : &PL_sv_undef);
     PUTBACK;
     count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
     SPAGAIN;
@@ -982,7 +1106,7 @@ ub_http1_input_create(pTHX_ SV *engine)
     );
     context->role = sv_derived_from(engine, "Unblock::HTTP1::Server") ? 1
         : sv_derived_from(engine, "Unblock::HTTP1::Client") ? 2 : 0;
-    context->direct_head = context->role == 1 ? 1 : 0;
+    context->direct_head = context->role ? 1 : 0;
     context->max_headers = 100;
     context->max_head_size = 65536;
 
@@ -1006,7 +1130,17 @@ ub_http1_input_create(pTHX_ SV *engine)
             value = hv_fetch(engine_hv, "rx", 2, 0);
             if (value != NULL && SvOK(*value) && SvTRUE(*value))
                 context->direct_head = 0;
+        } else if (context->role == 2) {
+            value = hv_fetch(engine_hv, "active", 6, 0);
+            if (value == NULL || !SvOK(*value) || !SvTRUE(*value))
+                context->direct_head = 0;
 
+            value = hv_fetch(engine_hv, "rx", 2, 0);
+            if (value != NULL && SvOK(*value) && SvTRUE(*value))
+                context->direct_head = 0;
+        }
+
+        if (context->role) {
             value = hv_fetch(engine_hv, "input", 5, 0);
             if (value != NULL && SvOK(*value) && SvCUR(*value) != 0)
                 context->direct_head = 0;
@@ -1029,7 +1163,7 @@ ub_http1_input_borrowed(
     ub_http1_borrowed_window *window = NULL;
     SV *object = NULL;
     SV *head = NULL;
-    SV *request = NULL;
+    SV *message = NULL;
     SV *window_arg = &PL_sv_undef;
     int head_ready = 0;
     int head_only = 0;
@@ -1043,7 +1177,7 @@ ub_http1_input_borrowed(
     if (data == NULL)
         data = "";
 
-    if (context->role == 1 && context->direct_head) {
+    if (context->direct_head && context->role == 1) {
         head = ub_http1_parse_request_head_result(
             aTHX_
             data,
@@ -1051,7 +1185,7 @@ ub_http1_input_borrowed(
             0,
             context->max_headers,
             context->uniform_native ? &context->uniform_api : NULL,
-            &request
+            &message
         );
 
         if (head == NULL) {
@@ -1059,6 +1193,42 @@ ub_http1_input_borrowed(
                 return UB_HTTP1_INPUT_MORE;
             head = new_error_result(
                 aTHX_ 431, "request head exceeds configured limit"
+            );
+            need_window = 0;
+        } else if (SvROK(head) && SvTYPE(SvRV(head)) == SVt_PVHV) {
+            HV *head_hv = (HV *)SvRV(head);
+            SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
+
+            if (ok_sv != NULL && SvTRUE(*ok_sv)) {
+                SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
+                if (consumed_sv != NULL && SvOK(*consumed_sv)) {
+                    UV head_consumed = SvUV(*consumed_sv);
+                    if (head_consumed <= (UV)length
+                        && head_consumed == (UV)length) {
+                        need_window = 0;
+                        head_only = 1;
+                    }
+                }
+            } else {
+                need_window = 0;
+            }
+        }
+    } else if (context->direct_head && context->role == 2) {
+        head = ub_http1_parse_response_head_result(
+            aTHX_
+            data,
+            length,
+            0,
+            context->max_headers,
+            context->uniform_native ? &context->uniform_api : NULL,
+            &message
+        );
+
+        if (head == NULL) {
+            if (length <= context->max_head_size)
+                return UB_HTTP1_INPUT_MORE;
+            head = new_error_result(
+                aTHX_ 0, "HTTP/1 response head exceeds configured limit"
             );
             need_window = 0;
         } else if (SvROK(head) && SvTYPE(SvRV(head)) == SVt_PVHV) {
@@ -1089,19 +1259,19 @@ ub_http1_input_borrowed(
         JMPENV_PUSH(jump_status);
         if (jump_status == 0) {
             result = ub_http1_call_engine_head(
-                aTHX_ context, head, request, &head_ready
+                aTHX_ context, head, message, &head_ready
             );
             JMPENV_POP;
         } else {
             JMPENV_POP;
-            if (request != NULL)
-                SvREFCNT_dec(request);
+            if (message != NULL)
+                SvREFCNT_dec(message);
             SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
         }
 
-        if (request != NULL)
-            SvREFCNT_dec(request);
+        if (message != NULL)
+            SvREFCNT_dec(message);
         SvREFCNT_dec(head);
 
         if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
@@ -1146,7 +1316,7 @@ ub_http1_input_borrowed(
                 window_arg,
                 length,
                 head,
-                request,
+                message,
                 consumed,
                 &head_ready
             );
@@ -1157,8 +1327,8 @@ ub_http1_input_borrowed(
                 window->valid = 0;
             if (object != NULL)
                 SvREFCNT_dec(object);
-            if (request != NULL)
-                SvREFCNT_dec(request);
+            if (message != NULL)
+                SvREFCNT_dec(message);
             if (head != NULL)
                 SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
@@ -1169,8 +1339,8 @@ ub_http1_input_borrowed(
         window->valid = 0;
     if (object != NULL)
         SvREFCNT_dec(object);
-    if (request != NULL)
-        SvREFCNT_dec(request);
+    if (message != NULL)
+        SvREFCNT_dec(message);
     if (head != NULL)
         SvREFCNT_dec(head);
 
@@ -1178,7 +1348,7 @@ ub_http1_input_borrowed(
         || result == 2)
         croak("Unblock::HTTP1 engine returned invalid native input status");
 
-    if (context->role == 1)
+    if (context->role)
         context->direct_head = head_ready;
 
     return result;
@@ -1321,15 +1491,6 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
-    int minor;
-    int status;
-    const char *reason;
-    size_t reason_len;
-    struct phr_header headers[UB_HTTP1_MAX_HEADERS];
-    size_t count;
-    int consumed;
-    HV *hv;
-    AV *list;
   CODE:
     (void)CLASS;
     buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
@@ -1337,34 +1498,17 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
         croak("offset exceeds buffer length");
     buf += (size_t)offset;
     buffer_len -= (STRLEN)offset;
-    if (last_len > (UV)buffer_len)
-        croak("last_len exceeds input window length");
-    if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
-        croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
-    count = (size_t)max_headers;
-    consumed = phr_parse_response(buf, (size_t)buffer_len, &minor, &status,
-        &reason, &reason_len, headers, &count, (size_t)last_len);
-    if (consumed == -2) XSRETURN_UNDEF;
-    if (consumed == -1 || minor < 0 || minor > 9 || status < 100 || status > 599 ||
-        buffer_len < 13 || !memEQ(buf, "HTTP/1.", 7) ||
-        buf[7] < '0' || buf[7] > '9' || buf[8] != ' ' ||
-        buf[9] < '0' || buf[9] > '9' ||
-        buf[10] < '0' || buf[10] > '9' ||
-        buf[11] < '0' || buf[11] > '9' || buf[12] != ' ' ||
-        reason != buf + 13 ||
-        !valid_field_value(reason, reason_len) || !strict_headers(headers, count)) {
-        RETVAL = new_error_result(aTHX_ 0, "malformed HTTP/1 response");
-    } else {
-        hv = newHV();
-        hv_store(hv, "ok", 2, newSViv(1), 0);
-        hv_store(hv, "consumed", 8, newSViv(consumed), 0);
-        hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
-        hv_store(hv, "status", 6, newSViv(status), 0);
-        hv_store(hv, "reason", 6, newSVpvn(reason, (STRLEN)reason_len), 0);
-        list = headers_to_av(aTHX_ headers, count);
-        hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
-        RETVAL = newRV_noinc((SV *)hv);
-    }
+    RETVAL = ub_http1_parse_response_head_result(
+        aTHX_
+        buf,
+        (size_t)buffer_len,
+        (size_t)last_len,
+        (size_t)max_headers,
+        NULL,
+        NULL
+    );
+    if (RETVAL == NULL)
+        XSRETURN_UNDEF;
   OUTPUT:
     RETVAL
 
