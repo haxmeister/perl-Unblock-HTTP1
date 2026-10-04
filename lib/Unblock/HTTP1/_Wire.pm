@@ -115,6 +115,134 @@ sub _transfer_encoding {
 }
 
 
+sub _transfer_coding_token_end {
+    my ($value, $pos) = @_;
+    my $len = length $value;
+    my $start = $pos;
+    while ($pos < $len) {
+        my $ch = substr($value, $pos, 1);
+        last unless $ch =~ /[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]/;
+        ++$pos;
+    }
+    return $pos > $start ? $pos : undef;
+}
+
+sub _parse_transfer_coding_member {
+    my ($member) = @_;
+    $member = _trim($member);
+    croak 'invalid Transfer-Encoding' unless length $member;
+
+    my $len = length $member;
+    my $pos = 0;
+    my $end = _transfer_coding_token_end($member, $pos);
+    croak 'invalid Transfer-Encoding' unless defined $end;
+    my $coding = _lc(substr($member, $pos, $end - $pos));
+    $pos = $end;
+    my $parameters = 0;
+
+    while (1) {
+        ++$pos while $pos < $len && substr($member, $pos, 1) =~ /[ \t]/;
+        last if $pos == $len;
+
+        croak 'invalid Transfer-Encoding'
+            unless substr($member, $pos, 1) eq ';';
+        ++$pos;
+        ++$pos while $pos < $len && substr($member, $pos, 1) =~ /[ \t]/;
+
+        $end = _transfer_coding_token_end($member, $pos);
+        croak 'invalid Transfer-Encoding parameter' unless defined $end;
+        $pos = $end;
+        ++$pos while $pos < $len && substr($member, $pos, 1) =~ /[ \t]/;
+
+        croak 'invalid Transfer-Encoding parameter'
+            unless $pos < $len && substr($member, $pos, 1) eq '=';
+        ++$pos;
+        ++$pos while $pos < $len && substr($member, $pos, 1) =~ /[ \t]/;
+        croak 'invalid Transfer-Encoding parameter' if $pos == $len;
+
+        if (substr($member, $pos, 1) eq '"') {
+            ++$pos;
+            my $closed = 0;
+            while ($pos < $len) {
+                my $ch = substr($member, $pos, 1);
+                if ($ch eq '"') {
+                    ++$pos;
+                    $closed = 1;
+                    last;
+                }
+                if ($ch eq '\\') {
+                    ++$pos;
+                    croak 'invalid Transfer-Encoding quoted parameter'
+                        if $pos == $len;
+                    ++$pos;
+                    next;
+                }
+                my $ord = ord($ch);
+                croak 'invalid Transfer-Encoding quoted parameter'
+                    if ($ord < 0x20 && $ch ne "\t") || $ord == 0x7f;
+                ++$pos;
+            }
+            croak 'unterminated Transfer-Encoding quoted parameter'
+                unless $closed;
+        } else {
+            $end = _transfer_coding_token_end($member, $pos);
+            croak 'invalid Transfer-Encoding parameter value'
+                unless defined $end;
+            $pos = $end;
+        }
+        ++$parameters;
+    }
+
+    croak 'chunked transfer coding does not accept parameters'
+        if $coding eq 'chunked' && $parameters;
+    return $coding;
+}
+
+sub _response_transfer_encoding {
+    my ($fields) = @_;
+    my @coding;
+
+    for my $value (@{ _values($fields, 'Transfer-Encoding') }) {
+        my @member;
+        my $start = 0;
+        my $quoted = 0;
+        my $escaped = 0;
+        my $len = length $value;
+
+        for my $pos (0 .. $len - 1) {
+            my $ch = substr($value, $pos, 1);
+            if ($escaped) {
+                $escaped = 0;
+                next;
+            }
+            if ($quoted && $ch eq '\\') {
+                $escaped = 1;
+                next;
+            }
+            if ($ch eq '"') {
+                $quoted = !$quoted;
+                next;
+            }
+            next unless $ch eq ',' && !$quoted;
+            push @member, substr($value, $start, $pos - $start);
+            $start = $pos + 1;
+        }
+
+        croak 'unterminated Transfer-Encoding quoted parameter'
+            if $quoted || $escaped;
+        push @member, substr($value, $start);
+
+        push @coding, map { _parse_transfer_coding_member($_) } @member;
+    }
+
+    my $chunked = grep { $_ eq 'chunked' } @coding;
+    croak 'chunked transfer coding must not be applied more than once'
+        if $chunked > 1;
+
+    return \@coding;
+}
+
+
 sub _trim {
     my ($value) = @_;
     $value =~ s/\A[ \t]+//;
@@ -588,9 +716,14 @@ sub response_receive_plan {
         : $head->{version} eq '1.1' ? 1
         : $tokens->{'keep-alive'} ? 1 : 0;
 
+    my $raw_te = _values($fields, 'Transfer-Encoding');
+    croak 'HTTP/1.0 response must not contain Transfer-Encoding'
+        if $head->{version} eq '1.0' && @$raw_te;
+
     # HEAD and 304 never carry HTTP content. Content-Length and
     # Transfer-Encoding, when present, describe the corresponding selected
-    # representation rather than framing bytes on this message.
+    # representation rather than framing bytes on this message. The framing
+    # algorithm terminates these responses at the header boundary.
     if ($method eq 'HEAD' || $status == 304) {
         return {
             mode       => 'none',
@@ -601,7 +734,7 @@ sub response_receive_plan {
     }
 
     my $cl = _content_length($fields);
-    my $te = _transfer_encoding($fields);
+    my $te = _response_transfer_encoding($fields);
     croak 'response contains both Transfer-Encoding and Content-Length'
         if @$te && defined $cl;
 
@@ -619,7 +752,7 @@ sub response_receive_plan {
     my $remaining;
     if (!$body_forbidden) {
         if (@$te) {
-            $mode = 'chunked';
+            $mode = $te->[-1] eq 'chunked' ? 'chunked' : 'close';
         } elsif (defined $cl) {
             $mode = 'content-length';
             $remaining = $cl;
