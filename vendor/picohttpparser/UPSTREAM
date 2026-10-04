@@ -16,5 +16,11 @@ The vendored source is compiled from this distribution. Installation and
 building must not require access to the upstream repository or any other
 network resource.
 
-Initial import: no local modifications to picohttpparser.c or
-picohttpparser.h.
+Local modifications:
+
+- Unblock::HTTP1 adds a per-decoder chunk-extension byte budget to
+  phr_chunked_decoder. The decode loop counts extension bytes across fragmented
+  input and rejects a chunk header when the configured nonzero limit is
+  exceeded. A zero limit preserves unlimited upstream behavior.
+
+No parsing or wire semantics outside that resource limit are changed locally.
