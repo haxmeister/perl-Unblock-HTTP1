@@ -18,11 +18,13 @@ is($head->{body_mode}, 'content-length', 'content-length framing detected');
 is($head->{content_length}, 5, 'content length retained');
 ok($head->{keep_alive}, 'HTTP/1.1 persistent by default');
 
-my $bad_version = Unblock::HTTP1::_Native->parse_request_head(
+my $higher_version = Unblock::HTTP1::_Native->parse_request_head(
     "GET / HTTP/1.2\r\nHost: example.test\r\n\r\n"
 );
-ok(!$bad_version->{ok}, 'unsupported HTTP/1 version rejected');
-is($bad_version->{status}, 505, 'unsupported request version maps to 505');
+ok($higher_version->{ok}, 'higher HTTP/1 minor version is accepted');
+is($higher_version->{version}, '1.2', 'higher request version is retained');
+ok($higher_version->{keep_alive},
+    'higher request minor uses HTTP/1.1 persistence semantics');
 
 my $ambiguous = Unblock::HTTP1::_Native->parse_request_head(
     "POST / HTTP/1.1\r\nHost: example.test\r\n" .
