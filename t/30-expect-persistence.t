@@ -71,6 +71,84 @@ subtest 'unsupported Expect is rejected before application dispatch' => sub {
     ok($server->is_closed, 'unsupported expectation closes the HTTP connection');
 };
 
+subtest 'HTTP/1.0 ignores Expect instead of sending 100 or 417' => sub {
+    my @event;
+    my $body = '';
+    my $server = Unblock::HTTP1::Server->new(
+        on_request => sub { push @event, 'request' },
+        on_body => sub {
+            my ($tx, $request, $bytes) = @_;
+            $body .= $bytes;
+            push @event, 'body';
+        },
+        on_request_end => sub {
+            my ($tx) = @_;
+            push @event, 'end';
+            $tx->respond(Uniform::HTTP::Response->new(
+                status => 200,
+                body   => 'ok',
+            ));
+        },
+    );
+
+    $server->input(
+        "POST /old HTTP/1.0\r\n" .
+        "Content-Length: 4\r\n" .
+        "Expect: 100-continue\r\n" .
+        "\r\n"
+    );
+
+    is($server->output, '',
+        'HTTP/1.0 Expect does not generate an informational or error response');
+    is_deeply(\@event, [ 'request' ],
+        'HTTP/1.0 request head reaches the application normally');
+
+    $server->input('data');
+    is($body, 'data', 'HTTP/1.0 request body is delivered normally');
+    is_deeply(\@event, [ qw(request body end) ],
+        'HTTP/1.0 request completes normally');
+    is(
+        $server->output,
+        "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        'ordinary final response is emitted without an interim response',
+    );
+};
+
+subtest 'server cannot send informational response to HTTP/1.0 client' => sub {
+    my $informational_error;
+    my $server = Unblock::HTTP1::Server->new(
+        on_request => sub {
+            my ($tx) = @_;
+            my $ok = eval {
+                $tx->send_informational(
+                    Uniform::HTTP::Response->new(status => 103)
+                );
+                1;
+            };
+            $informational_error = $@ unless $ok;
+            $tx->respond(Uniform::HTTP::Response->new(
+                status => 200,
+                body   => 'ok',
+            ));
+        },
+    );
+
+    $server->input("GET / HTTP/1.0\r\n\r\n");
+
+    like(
+        $informational_error,
+        qr/HTTP\/1\.0 clients cannot receive 1xx responses/,
+        'informational response attempt fails explicitly',
+    );
+    unlike($server->output, qr/\AHTTP\/1\.0 1[0-9][0-9]/,
+        'no 1xx response reaches the HTTP/1.0 wire');
+    is(
+        $server->output,
+        "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        'final HTTP/1.0 response remains valid',
+    );
+};
+
 subtest 'HTTP/1.0 known-length response can remain persistent' => sub {
     my @target;
     my $server = Unblock::HTTP1::Server->new(
