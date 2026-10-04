@@ -87,6 +87,12 @@ For a streaming request body:
 HTTP/1.1 uses chunked transfer coding when the length is not known in advance.
 HTTP/1.0 streaming requests require an explicit Content-Length.
 
+For received responses, Unblock removes HTTP message framing. A final
+C<chunked> transfer coding is decoded as framing. Any earlier transfer coding,
+such as C<gzip>, remains encoded in the body bytes and remains visible in the
+C<Transfer-Encoding> field. Unblock does not silently perform compression or
+representation decoding.
+
 ## Server
 
     use Uniform::HTTP::Response;
@@ -130,7 +136,8 @@ while other frameworks can hand the same bytes to their own protocol object.
 
 ## What Unblock::HTTP1 owns
 
-- HTTP/1.0 and HTTP/1.1 request and response parsing
+- HTTP/1.0 and HTTP/1.1 request and response semantics
+- compatible handling of higher HTTP/1 minor versions using HTTP/1.1 semantics
 - strict message framing validation
 - request and response serialization
 - Content-Length framing
