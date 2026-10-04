@@ -177,6 +177,39 @@ valid_connect_authority(const char *target, size_t len)
 }
 
 static int
+connect_host_matches_target(const char *host, size_t host_len,
+                            const char *target, size_t target_len)
+{
+    size_t target_host_len = 0;
+    size_t i;
+
+    if (ascii_equal_ci(host, host_len, target, target_len))
+        return 1;
+
+    if (target_len == 0)
+        return 0;
+
+    if (target[0] == '[') {
+        for (i = 1; i < target_len; ++i) {
+            if (target[i] == ']') {
+                target_host_len = i + 1;
+                break;
+            }
+        }
+    } else {
+        for (i = 0; i < target_len; ++i) {
+            if (target[i] == ':') {
+                target_host_len = i;
+                break;
+            }
+        }
+    }
+
+    return target_host_len != 0
+        && ascii_equal_ci(host, host_len, target, target_host_len);
+}
+
+static int
 valid_request_target(const char *method, size_t method_len,
                      const char *target, size_t target_len)
 {
@@ -493,8 +526,10 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             error = "CONNECT request must not contain content framing"; error_status = 400;
         }
         if (!error && is_connect && host_count == 1 &&
-            !ascii_equal_ci(host_value, host_value_len, target, target_len)) {
-            error = "CONNECT Host must match request target"; error_status = 400;
+            !connect_host_matches_target(
+                host_value, host_value_len, target, target_len
+            )) {
+            error = "CONNECT Host must identify request target"; error_status = 400;
         }
         if (!error && te_present) {
             if (chunked_count != 1 || !final_chunked) {
