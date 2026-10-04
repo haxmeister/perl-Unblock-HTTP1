@@ -131,6 +131,12 @@ Current standalone measurements show:
   faster than their full validation-path controls in same-run CI measurements;
 - response receive framing analysis is small enough that moving it to XS is not
   currently justified;
+- benchmark-only trusted Uniform construction is roughly four times faster than
+  public constructor materialization for both parsed requests and parsed
+  responses in current same-run CI measurements;
+- the trusted-construction result is symmetric across request and response
+  objects, making repeated Uniform validation the clearest remaining
+  receive-side cost;
 - connection object reuse changes standalone throughput much less than the
   per-message lifecycle, so optimization should remain focused on transaction
   work rather than engine construction.
