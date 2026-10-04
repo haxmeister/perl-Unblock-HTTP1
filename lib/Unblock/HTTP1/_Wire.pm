@@ -417,7 +417,7 @@ sub response_receive_plan {
         if @$te && defined $cl;
 
     my $body_forbidden = ($status >= 100 && $status < 200)
-        || $status == 204 || $status == 205;
+        || $status == 204;
 
     croak '1xx and 204 responses must not contain Content-Length'
         if (($status >= 100 && $status < 200) || $status == 204) && defined $cl;
@@ -442,10 +442,11 @@ sub response_receive_plan {
     $keep_alive = 0 if $mode eq 'close';
 
     return {
-        mode       => $mode,
-        remaining  => $remaining,
-        switch     => 0,
-        keep_alive => $keep_alive,
+        mode           => $mode,
+        remaining      => $remaining,
+        switch         => 0,
+        keep_alive     => $keep_alive,
+        forbid_content => $status == 205 ? 1 : 0,
     };
 }
 
@@ -478,7 +479,7 @@ sub response_plan {
     my $upgrade_switch = $status == 101 ? 1 : 0;
     my $switch = $connect_switch || $upgrade_switch ? 1 : 0;
     my $body_forbidden = $switch || ($status >= 100 && $status < 200)
-        || $status == 204 || $status == 205 || $status == 304;
+        || $status == 204 || $status == 304;
     my $head_only = $method eq 'HEAD' ? 1 : 0;
 
     if ($connect_switch) {
@@ -501,6 +502,11 @@ sub response_plan {
     croak 'this response status cannot carry a body or trailers'
         if $body_forbidden && !$switch
             && ((defined($body) && length($body)) || $stream_body || @$trailers);
+
+    croak '205 response must not contain content'
+        if $status == 205 && defined($body) && length($body);
+    croak '205 response cannot use a streaming content producer'
+        if $status == 205 && $stream_body;
 
     my $cl = _content_length($fields);
     my $metadata_only_framing = $head_only || $status == 304 ? 1 : 0;
