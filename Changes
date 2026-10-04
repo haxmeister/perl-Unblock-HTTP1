@@ -1,69 +1,16 @@
 Revision history for Unblock-HTTP1
 
-0.001  Development
-    - Initial portable HTTP/1.0 and HTTP/1.1 protocol engine.
+0.01  2026-10-04
+    - First release.
+    - Portable HTTP/1.0 and HTTP/1.1 client/server protocol engine.
     - Event-loop, transport, and operating-system neutral byte interface.
     - Uniform::HTTP 0.04 request and response objects.
-    - Strict request and response parsing with picohttpparser.
-    - Fixed-length, chunked, and close-delimited body framing.
-    - Lossless HTTP/1 trailer delivery into Uniform::HTTP messages.
+    - Content-Length, chunked, close-delimited, and transfer-coding framing.
     - Streaming request and response bodies with cooperative backpressure.
-    - Informational responses and exact 101/CONNECT protocol handoff boundary.
-    - HTTP/1 parity pass for CONNECT and Upgrade validation.
-    - RFC-correct HEAD, 1xx, 204, 205, and 304 response framing.
-    - Expect: 100-continue handling before application body delivery.
-    - HTTP/1.0 persistence and close-delimited streaming parity.
-    - EOF truncation, cancellation, early-final-response, and backpressure tests.
-    - Expanded framing, fragmentation, queue/reuse, and configured-limit tests.
-    - Cross-platform CI on Linux, macOS, and Windows with Perl 5.16 coverage.
-    - Standalone parse, serialization, fixed-body, chunked-body, and loopback
-      benchmarks for optimization work.
-    - Fast paths for common HTTP/1.1 request and response serialization plans.
-    - Buffered HTTP/1.1 planning fast paths benchmark at roughly four times the
-      full validation-path controls in same-run development measurements.
-    - Bodyless and fully buffered fixed-length receive fast paths avoid
-      unnecessary receive-state allocation while preserving callback lifecycle.
-    - Focused fast-path regressions compare coalesced and fragmented body input.
-    - Cross-engine receive benchmarks isolate Uniform message construction as
-      the clearest remaining receive-side performance cost.
-    - Callback and message-finalization diagnostics show those lifecycle calls
-      are not useful optimization targets.
-    - Added an explicit distribution MANIFEST and CI disttest coverage.
-    - Documented the portable adapter boundary and kept transport-specific
-      native bridges outside the engine.
-    - Originating response transfer-coding chains now mirror receive framing:
-      final chunked is owned by Unblock and non-chunked final codings close.
-    - Received absolute-form and CONNECT requests expose explicit Uniform
-      routing metadata from the request-target while preserving raw Host bytes.
-    - Hardened request-target form validation and HTTP method case sensitivity.
-    - Rejected unsolicited bytes beyond a final client response boundary to
-      prevent queued-response poisoning.
-    - Added RFC-correct response framing for transfer codings that precede
-      chunked or require connection-close delimiting.
-    - Normalized equivalent Content-Length decimal spellings and rejected
-      values outside the supported framing counter range.
-    - Relaxed CONNECT Host validation so the Host port may be omitted while
-      still requiring the same destination host.
-    - Hardened serializer method, field, reason-phrase, status, and Connection
-      syntax at the wire boundary, including duck-typed adapter objects.
-    - Accepted higher HTTP/1 minor versions using HTTP/1.1 semantics while
-      preserving the actual received version in Uniform messages.
-    - Corrected HTTP/1.0 Expect and informational-response behavior.
-    - Rejected unsolicited client response bytes both after a final response
-      and while no request is outstanding.
-    - Added general response Transfer-Encoding framing: final chunked framing
-      is removed while earlier transfer codings remain opaque.
-    - Kept strict CRLF requirements for chunk framing with dedicated tests.
-    - Allowed legal empty Host port subcomponents while rejecting empty HTTP
-      absolute-form hosts.
-    - Kept informational responses on the dedicated send_informational() API.
-    - Allowed Content-Length: 0 on CONNECT requests while still rejecting
-      request content and Transfer-Encoding.
-    - Enforced HTTP/1.1 TE negotiation, including Connection: TE,
-      qvalues, implicit chunked acceptance, and response-coding selection.
-    - Known outgoing trailer names are announced automatically with Trailer
-      while late streaming trailers can still be predeclared explicitly.
-    - Added a configurable cumulative chunk-extension budget in the vendored
-      native decoder, defaulting to 16384 bytes per chunked message.
-    - Engine constructors now reject unknown option names instead of silently
-      ignoring configuration typos.
+    - Ordered headers and trailers with strict framing validation.
+    - Persistent connection, Expect, informational response, Upgrade, and
+      CONNECT semantics.
+    - Request-smuggling protections and configurable parser/resource limits.
+    - Exact post-HTTP protocol-switch byte preservation.
+    - Native picohttpparser backend with portable Perl-facing API.
+    - Cross-platform CI on Linux, macOS, and Windows, including Perl 5.16.
