@@ -60,6 +60,11 @@ sub _drive {
             }
             substr($self->{input}, 0, $head->{consumed}, '');
 
+            if ($head->{expect_continue} < 0) {
+                $self->_protocol_error(417, 'unsupported Expect field');
+                return;
+            }
+
             my $request = Uniform::HTTP::Request->new(
                 method  => $head->{method},
                 target  => $head->{target},
@@ -94,11 +99,6 @@ sub _drive {
             my $cb = $self->_invoke_server('on_request', $tx, $request);
             return $self->_application_error($cb) unless $cb eq '1';
             return if $self->{switched} || $self->{closed};
-
-            if ($head->{expect_continue} < 0) {
-                $self->_protocol_error(417, 'unsupported Expect field');
-                return;
-            }
 
             if ($rx->{mode} eq 'none' ||
                 ($rx->{mode} eq 'content-length' && !$rx->{remaining})) {
