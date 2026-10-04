@@ -41,6 +41,7 @@ sub _drive {
         my $rx = $self->{rx};
 
         if (!$tx) {
+            return unless $self->_input_length;
             my $head = delete $self->{borrowed_head};
             if (!$head) {
                 my ($input, $offset) = $self->_input_window;
