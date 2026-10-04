@@ -67,7 +67,7 @@ sub input {
 }
 
 sub _input_borrowed {
-    my ($self, $window, $length, $head, $request) = @_;
+    my ($self, $window, $length, $head, $message) = @_;
     croak '_input_borrowed(): cannot be called recursively from an engine callback'
         if $self->{driving};
     return (4, 0, 0) if $self->{switched};
@@ -90,7 +90,7 @@ sub _input_borrowed {
         local $self->{borrowed_length} = $length;
         local $self->{borrowed_offset} = 0;
         local $self->{borrowed_head} = $head;
-        local $self->{borrowed_request} = $request;
+        local $self->{borrowed_message} = $message;
         local $self->{driving} = 1;
         $self->_drive;
 
