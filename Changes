@@ -1,0 +1,11 @@
+Revision history for Unblock-HTTP1
+
+0.001  Development
+    - Initial portable HTTP/1.0 and HTTP/1.1 protocol engine.
+    - Event-loop, transport, and operating-system neutral byte interface.
+    - Uniform::HTTP 0.04 request and response objects.
+    - Strict request and response parsing with picohttpparser.
+    - Fixed-length, chunked, and close-delimited body framing.
+    - Lossless HTTP/1 trailer delivery into Uniform::HTTP messages.
+    - Streaming request and response bodies with cooperative backpressure.
+    - Informational responses and exact 101/CONNECT protocol handoff boundary.
