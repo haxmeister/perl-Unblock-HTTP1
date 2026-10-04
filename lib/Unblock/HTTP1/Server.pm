@@ -86,27 +86,38 @@ sub _drive {
             $tx->{request_keep_alive} = $head->{keep_alive} ? 1 : 0;
             $tx->{request_body_mode} = $head->{body_mode};
             $self->{active} = $tx;
-            $self->{rx} = $rx = {
-                mode      => $head->{body_mode},
-                remaining => $head->{content_length},
-                request   => $request,
-            };
-            if ($rx->{mode} eq 'chunked') {
-                $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
-            }
 
-            if ($head->{expect_continue} > 0
-                && ($rx->{mode} eq 'chunked'
-                    || ($rx->{mode} eq 'content-length' && $rx->{remaining}))) {
-                $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
+            my $bodyless = $head->{body_mode} eq 'none' ? 1 : 0;
+            if (!$bodyless) {
+                $self->{rx} = $rx = {
+                    mode      => $head->{body_mode},
+                    remaining => $head->{content_length},
+                    request   => $request,
+                };
+                if ($rx->{mode} eq 'chunked') {
+                    $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
+                }
+
+                if ($head->{expect_continue} > 0
+                    && ($rx->{mode} eq 'chunked'
+                        || ($rx->{mode} eq 'content-length' && $rx->{remaining}))) {
+                    $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
+                }
             }
 
             my $cb = $self->_invoke_server('on_request', $tx, $request);
             return $self->_application_error($cb) unless $cb eq '1';
             return if $self->{switched} || $self->{closed};
 
-            if ($rx->{mode} eq 'none' ||
-                ($rx->{mode} eq 'content-length' && !$rx->{remaining})) {
+            if ($bodyless) {
+                $tx->_mark_remote_done;
+                my $end_cb = $self->_invoke_server('on_request_end', $tx, $request);
+                return $self->_application_error($end_cb) unless $end_cb eq '1';
+                $self->_retire_if_done;
+                next;
+            }
+
+            if ($rx->{mode} eq 'content-length' && !$rx->{remaining}) {
                 $self->_finish_request;
                 next;
             }
