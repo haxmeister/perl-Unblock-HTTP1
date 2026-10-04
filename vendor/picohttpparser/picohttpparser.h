@@ -73,7 +73,7 @@ struct phr_chunked_decoder {
     char _state;
     uint64_t _total_read;
     uint64_t _total_overhead;
-    size_t _chunk_ext_size;
+    size_t _total_chunk_ext_size;
     size_t _max_chunk_ext_size;
 };
 
