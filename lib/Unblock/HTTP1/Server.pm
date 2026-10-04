@@ -70,7 +70,12 @@ sub _drive {
                 target  => $head->{target},
                 version => $head->{version},
                 headers => $head->{headers},
-            )->mark_incomplete->freeze_initial;
+            );
+            if ($head->{body_mode} eq 'none') {
+                $request->freeze;
+            } else {
+                $request->mark_incomplete->freeze_initial;
+            }
 
             $tx = Unblock::HTTP1::Transaction->_new(
                 $self, $request,
