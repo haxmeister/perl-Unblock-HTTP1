@@ -1,0 +1,174 @@
+use strict;
+use warnings;
+use Test::More;
+
+use Uniform::HTTP::Request;
+use Uniform::HTTP::Response;
+use Unblock::HTTP1::Client;
+use Unblock::HTTP1::NativeABI;
+use Unblock::HTTP1::Server;
+use Unblock::HTTP1::_Native;
+
+my $definition = Unblock::HTTP1::NativeABI::definition();
+is $definition->{abi_version}, 1, 'borrowed input ABI version is 1';
+ok $definition->{operations_address}, 'borrowed input ABI exposes native operations';
+
+my @events;
+my $server = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        my ($tx) = @_;
+        push @events, 'request';
+        $tx->respond(Uniform::HTTP::Response->new(
+            status => 200,
+            body   => 'ok',
+        ));
+    },
+    on_request_end => sub { push @events, 'request_end' },
+);
+
+my $partial = "GET /borrowed HTTP/1.1\r\nHost: example.test\r\n";
+my ($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once($server, $partial);
+is $status, Unblock::HTTP1::NativeABI::INPUT_MORE(),
+    'incomplete borrowed request asks host for more bytes';
+is $consumed, 0, 'incomplete head leaves borrowed prefix with host';
+
+my $request_wire = $partial . "\r\n";
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once($server, $request_wire);
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'complete borrowed request is consumed';
+is $consumed, length($request_wire), 'complete request reports exact consumed prefix';
+is_deeply \@events, [qw(request request_end)],
+    'borrowed request follows ordinary server lifecycle';
+like $server->output, qr/\AHTTP\/1\.1 200 OK\r\n/,
+    'borrowed request produces ordinary response output';
+
+my $body = '';
+my $body_server = Unblock::HTTP1::Server->new(
+    on_request => sub { push @events, 'body_request' },
+    on_body => sub {
+        $body .= $_[2];
+    },
+    on_request_end => sub {
+        my ($tx) = @_;
+        $tx->respond(Uniform::HTTP::Response->new(status => 204));
+    },
+);
+
+my $head =
+    "POST /body HTTP/1.1\r\n" .
+    "Host: example.test\r\n" .
+    "Content-Length: 5\r\n\r\n";
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once($body_server, $head . 'he');
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'borrowed fixed body consumes available prefix';
+is $consumed, length($head) + 2,
+    'borrowed fixed body reports head plus delivered body bytes';
+is $body, 'he', 'first borrowed body fragment delivered';
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once($body_server, 'llo');
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'borrowed fixed body completes on later window';
+is $consumed, 3, 'later fixed body window fully consumed';
+is $body, 'hello', 'borrowed fixed body preserves content';
+
+my $chunked = '';
+my $chunked_server = Unblock::HTTP1::Server->new(
+    on_request => sub { },
+    on_body => sub { $chunked .= $_[2] },
+    on_request_end => sub {
+        my ($tx) = @_;
+        $tx->respond(Uniform::HTTP::Response->new(status => 204));
+    },
+);
+my $chunk_head =
+    "POST /chunked HTTP/1.1\r\n" .
+    "Host: example.test\r\n" .
+    "Transfer-Encoding: chunked\r\n\r\n";
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once(
+        $chunked_server, $chunk_head . "4\r\nWi"
+    );
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'fragmented borrowed chunk framing consumes its native window';
+is $consumed, length($chunk_head) + 5,
+    'chunked borrowed path reports consumed window';
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once(
+        $chunked_server, "ki\r\n0\r\n\r\n"
+    );
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'borrowed chunked body completes';
+is $consumed, length("ki\r\n0\r\n\r\n"),
+    'completed chunked window fully consumed';
+is $chunked, 'Wiki', 'borrowed chunk decoder preserves payload';
+
+my @switch;
+my $switch_server = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        my ($tx) = @_;
+        $tx->respond(Uniform::HTTP::Response->new(
+            status => 101,
+            headers => [
+                [ Connection => 'Upgrade' ],
+                [ Upgrade    => 'test-proto' ],
+            ],
+        ));
+    },
+    on_switch => sub { push @switch, 'server' },
+);
+my $switch_request =
+    "GET /switch HTTP/1.1\r\n" .
+    "Host: example.test\r\n" .
+    "Connection: Upgrade\r\n" .
+    "Upgrade: test-proto\r\n\r\n";
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once(
+        $switch_server, $switch_request . 'PING'
+    );
+is $status, Unblock::HTTP1::NativeABI::INPUT_SWITCH(),
+    'borrowed server reports protocol switch';
+is $consumed, length($switch_request),
+    'post-switch bytes remain owned by native host';
+is $switch_server->take_remainder, '',
+    'borrowed switch does not copy native tail into Perl remainder';
+
+my $client = Unblock::HTTP1::Client->new;
+my $tx = $client->request(
+    Uniform::HTTP::Request->new(
+        method    => 'GET',
+        target    => '/switch',
+        authority => 'example.test',
+        headers   => [
+            [ Connection => 'Upgrade' ],
+            [ Upgrade    => 'test-proto' ],
+        ],
+    ),
+    on_switch => sub { push @switch, 'client' },
+);
+$client->output;
+
+my $switch_response =
+    "HTTP/1.1 101 Switching Protocols\r\n" .
+    "Connection: Upgrade\r\n" .
+    "Upgrade: test-proto\r\n\r\n";
+
+($status, $consumed) =
+    Unblock::HTTP1::_Native::_borrowed_input_once(
+        $client, $switch_response . 'PONG'
+    );
+is $status, Unblock::HTTP1::NativeABI::INPUT_SWITCH(),
+    'borrowed client reports protocol switch';
+is $consumed, length($switch_response),
+    'client leaves post-switch bytes with native host';
+ok $tx->is_complete, 'borrowed switch completes client transaction';
+is_deeply \@switch, [qw(server client)], 'switch callbacks still fire';
+
+done_testing;
