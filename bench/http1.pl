@@ -97,6 +97,14 @@ my $server_cycle = Unblock::HTTP1::Server->new(
 );
 my $client_cycle = Unblock::HTTP1::Client->new;
 
+my $borrowed_server_cycle = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        $_[0]->respond($response);
+    },
+);
+my $borrowed_server_driver =
+    Unblock::HTTP1::_Native::BorrowedDriver->new($borrowed_server_cycle);
+
 my $reuse_fixed_request_bytes = 0;
 my $reuse_fixed_response_bytes = 0;
 my $reuse_fixed_server = Unblock::HTTP1::Server->new(
@@ -192,6 +200,15 @@ cmpthese(
             $server_cycle->input($request_wire);
             my $wire = $server_cycle->output;
             die "server cycle failure"
+                unless $wire =~ /\AHTTP\/1\.1 200 OK\r\n/;
+        },
+        server_get_borrowed => sub {
+            my ($status, $consumed) =
+                $borrowed_server_driver->feed($request_wire);
+            die "borrowed server cycle failure"
+                unless $status == 0 && $consumed == length($request_wire);
+            my $wire = $borrowed_server_cycle->output;
+            die "borrowed server output failure"
                 unless $wire =~ /\AHTTP\/1\.1 200 OK\r\n/;
         },
         client_get_cycle => sub {
