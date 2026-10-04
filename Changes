@@ -31,3 +31,12 @@ Revision history for Unblock-HTTP1
     - Added an explicit distribution MANIFEST and CI disttest coverage.
     - Documented the portable Linux::Event adapter and optional native bridge
       boundary without introducing Linux-specific engine code.
+    - Hardened request-target form validation and HTTP method case sensitivity.
+    - Rejected unsolicited bytes beyond a final client response boundary to
+      prevent queued-response poisoning.
+    - Added RFC-correct response framing for transfer codings that precede
+      chunked or require connection-close delimiting.
+    - Normalized equivalent Content-Length decimal spellings and rejected
+      values outside the supported framing counter range.
+    - Relaxed CONNECT Host validation so the Host port may be omitted while
+      still requiring the same destination host.
