@@ -43,6 +43,7 @@ t/36-lifecycle-reentrancy.t
 t/37-fast-paths.t
 t/38-method-case.t
 t/39-request-target.t
+t/40-client-extra-response.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
