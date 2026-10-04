@@ -65,11 +65,15 @@ sub _drive {
                 return;
             }
 
+            my %target_metadata = Unblock::HTTP1::_Wire::_received_request_metadata(
+                $head->{method}, $head->{target},
+            );
             my $request = Uniform::HTTP::Request->new(
                 method  => $head->{method},
                 target  => $head->{target},
                 version => $head->{version},
                 headers => $head->{headers},
+                %target_metadata,
             );
             if ($head->{body_mode} eq 'none') {
                 $request->freeze;
