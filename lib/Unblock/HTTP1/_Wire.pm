@@ -342,7 +342,13 @@ sub _absolute_form_host {
     my $scheme = _lc($1);
     my $rest = $2;
 
-    # An absolute URI without an authority component requires an empty Host.
+    if (($scheme eq 'http' || $scheme eq 'https')
+        && substr($rest, 0, 2) ne '//') {
+        croak 'http(s) absolute-form request target requires an authority';
+    }
+
+    # Other absolute URI schemes can legitimately omit authority. In that
+    # case HTTP/1.1 still carries an empty Host field.
     return (1, '') unless substr($rest, 0, 2) eq '//';
 
     my $authority = substr($rest, 2);
