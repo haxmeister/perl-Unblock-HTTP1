@@ -88,7 +88,12 @@ sub _drive {
             $self->{active} = $tx;
 
             my $bodyless = $head->{body_mode} eq 'none' ? 1 : 0;
-            if (!$bodyless) {
+            my $fixed_ready = !$bodyless
+                && $head->{body_mode} eq 'content-length'
+                && defined($head->{content_length})
+                && length($self->{input}) >= $head->{content_length};
+
+            if (!$bodyless && !$fixed_ready) {
                 $self->{rx} = $rx = {
                     mode      => $head->{body_mode},
                     remaining => $head->{content_length},
@@ -97,12 +102,13 @@ sub _drive {
                 if ($rx->{mode} eq 'chunked') {
                     $rx->{decoder} = Unblock::HTTP1::_Native::Chunked->new;
                 }
+            }
 
-                if ($head->{expect_continue} > 0
-                    && ($rx->{mode} eq 'chunked'
-                        || ($rx->{mode} eq 'content-length' && $rx->{remaining}))) {
-                    $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
-                }
+            if ($head->{expect_continue} > 0
+                && ($head->{body_mode} eq 'chunked'
+                    || ($head->{body_mode} eq 'content-length'
+                        && $head->{content_length}))) {
+                $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
             }
 
             my $cb = $self->_invoke_server('on_request', $tx, $request);
@@ -117,8 +123,18 @@ sub _drive {
                 next;
             }
 
-            if ($rx->{mode} eq 'content-length' && !$rx->{remaining}) {
-                $self->_finish_request;
+            if ($fixed_ready) {
+                my $length = $head->{content_length};
+                if ($length) {
+                    my $bytes = substr($self->{input}, 0, $length, '');
+                    my $body_cb = $self->_invoke_server(
+                        'on_body', $tx, $request, $bytes,
+                    );
+                    return $self->_application_error($body_cb)
+                        unless $body_cb eq '1';
+                    return if $self->{switched} || $self->{closed};
+                }
+                $self->_complete_request($tx, $request);
                 next;
             }
         }
@@ -205,9 +221,14 @@ sub _finish_request {
     my ($self) = @_;
     my $tx = $self->{active} or return;
     my $rx = delete $self->{rx} or return;
-    $rx->{request}->mark_complete->freeze;
+    return $self->_complete_request($tx, $rx->{request});
+}
+
+sub _complete_request {
+    my ($self, $tx, $request) = @_;
+    $request->mark_complete->freeze;
     $tx->_mark_remote_done;
-    my $cb = $self->_invoke_server('on_request_end', $tx, $rx->{request});
+    my $cb = $self->_invoke_server('on_request_end', $tx, $request);
     return $self->_application_error($cb) unless $cb eq '1';
     $self->_retire_if_done;
     return;
