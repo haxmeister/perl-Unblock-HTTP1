@@ -408,7 +408,8 @@ sub _validate_connect_request {
     my ($request, $fields, $version, $body, $stream_body, $trailers) = @_;
     return unless $request->method eq 'CONNECT';
 
-    croak 'CONNECT requires HTTP/1.1' unless $version eq '1.1';
+    croak 'CONNECT requires HTTP/1.1 semantics'
+        unless _semantics_version($version) eq '1.1';
     croak 'CONNECT cannot use a streaming request body' if $stream_body;
     croak 'CONNECT request must not contain a buffered body' if defined $body;
     croak 'CONNECT request must not contain trailers' if $trailers && @$trailers;
@@ -430,7 +431,8 @@ sub _validate_connect_request {
 
 sub _validate_upgrade_request {
     my ($request, $fields, $version) = @_;
-    croak 'HTTP/1 Upgrade requires HTTP/1.1' unless $version eq '1.1';
+    croak 'HTTP/1 Upgrade requires HTTP/1.1 semantics'
+        unless _semantics_version($version) eq '1.1';
 
     my $connection = _connection_tokens($fields);
     croak 'HTTP/1 Upgrade request requires Connection: Upgrade'
@@ -454,8 +456,8 @@ sub _validate_upgrade_request {
 
 sub _validate_upgrade_response {
     my ($request, $request_fields, $response_fields, $response_version) = @_;
-    croak 'HTTP/1 Upgrade response must use HTTP/1.1'
-        unless $response_version eq '1.1';
+    croak 'HTTP/1 Upgrade response must use HTTP/1.1 semantics'
+        unless _semantics_version($response_version) eq '1.1';
 
     my $offered = _validate_upgrade_request(
         $request, $request_fields, $request->version || '1.1',
