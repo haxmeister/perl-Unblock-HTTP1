@@ -6,6 +6,21 @@ use Uniform::HTTP::Request;
 use Unblock::HTTP1::_Native;
 use Unblock::HTTP1::_Wire;
 
+{
+    package Unblock::HTTP1::TestRequest;
+
+    sub new { bless { target => $_[1] }, $_[0] }
+    sub method { 'GET' }
+    sub target { $_[0]{target} }
+    sub version { undef }
+    sub protocol { undef }
+    sub has_buffered_body { 0 }
+    sub trailer_count { 0 }
+    sub header_count { 1 }
+    sub header_name { 'Host' }
+    sub header_value { 'example.test' }
+}
+
 sub parse {
     return Unblock::HTTP1::_Native->parse_request_head($_[0]);
 }
@@ -240,11 +255,7 @@ subtest 'outgoing request target uses the same form rules' => sub {
     like($@, qr/invalid Host field/,
         'invalid Host error is explicit');
 
-    my $space = Uniform::HTTP::Request->new(
-        method  => 'GET',
-        target  => '/bad path',
-        headers => [ [ Host => 'example.test' ] ],
-    );
+    my $space = Unblock::HTTP1::TestRequest->new('/bad path');
     my $space_ok = eval {
         Unblock::HTTP1::_Wire::request_plan($space);
         1;
