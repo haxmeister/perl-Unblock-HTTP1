@@ -45,12 +45,26 @@ The host can call close($reason) when one expires.
 TLS is outside the engine. Feed decrypted application bytes into Unblock and
 send Unblock output through the TLS transport.
 
-## Native adapter optimization
+## Native borrowed input
 
-The public byte API is the correctness reference for every integration.
+The public byte API remains the correctness reference for every integration.
 
-A transport-specific adapter may later optimize byte movement with a native
-consumer interface when end-to-end measurements justify it. Such a bridge must
-remain an optimization rather than a second HTTP/1 implementation, and it must
-preserve the same framing, lifecycle, error, and protocol-switch behavior as
-the portable API.
+XS-backed transports can avoid the initial Perl input-buffer copy through
+C<Unblock::HTTP1::NativeABI>. ABI version 1 accepts a borrowed native
+C<(pointer, length)> window and reports the permanently consumed prefix.
+
+The transport keeps ownership of the bytes. Unblock does not retain the native
+pointer after the input operation returns.
+
+C<INPUT_MORE> means the host must keep the unconsumed tail and present it again
+with more contiguous input. C<INPUT_SWITCH> means HTTP has ended and the
+unconsumed tail belongs to the next protocol.
+
+A native adapter should create one ABI context per Client or Server connection
+and keep it for the connection lifetime. It must fall back to C<input()> when
+it cannot consume the advertised ABI version.
+
+Use C<Unblock::HTTP1::NativeABI::c_header()> when an XS adapter needs the
+versioned C structure declaration. The provider remains transport-neutral: it
+does not know about file descriptors, epoll, readiness watchers, or any
+framework-specific stream object.
