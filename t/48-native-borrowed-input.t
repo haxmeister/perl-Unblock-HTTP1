@@ -117,6 +117,104 @@ is $consumed, length("ki\r\n0\r\n\r\n"),
     'completed chunked window fully consumed';
 is $chunked, 'Wiki', 'borrowed chunk decoder preserves payload';
 
+my $native_response;
+my $client_body = '';
+my $native_client = Unblock::HTTP1::Client->new;
+my $client_driver =
+    Unblock::HTTP1::_Native::BorrowedDriver->new($native_client);
+my $native_tx = $native_client->request(
+    Uniform::HTTP::Request->new(
+        method    => 'GET',
+        target    => '/native-response',
+        authority => 'example.test',
+    ),
+    on_response => sub {
+        my ($tx, $response) = @_;
+        $native_response = $response;
+    },
+    on_body => sub {
+        $client_body .= $_[2];
+    },
+);
+$native_client->output;
+
+my $partial_response =
+    "HTTP/1.1 200 OK\r\n" .
+    "Content-Length: 5\r\n" .
+    "X-Native: yes\r\n";
+($status, $consumed) = $client_driver->feed($partial_response);
+is $status, Unblock::HTTP1::NativeABI::INPUT_MORE(),
+    'incomplete borrowed response asks host for more bytes';
+is $consumed, 0,
+    'incomplete response head leaves borrowed prefix with host';
+
+my $response_head = $partial_response . "\r\n";
+($status, $consumed) = $client_driver->feed($response_head . 'he');
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'borrowed client consumes response head and available fixed body';
+is $consumed, length($response_head) + 2,
+    'borrowed client reports exact response prefix consumption';
+is ref($native_response), 'Uniform::HTTP::Response',
+    'native client receive constructs the canonical Uniform response class';
+is $native_response->status, 200,
+    'native client response preserves status';
+is $native_response->header('X-Native'), 'yes',
+    'native client response preserves canonical header values';
+is $client_body, 'he',
+    'native client delivers first fixed response body fragment';
+
+($status, $consumed) = $client_driver->feed('llo');
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'borrowed client completes fixed response on later window';
+is $consumed, 3,
+    'later response body window is fully consumed';
+is $client_body, 'hello',
+    'borrowed client preserves fixed response body';
+ok $native_tx->is_complete,
+    'borrowed native response completes client transaction';
+
+my ($informational, $final_response);
+my $info_tx = $native_client->request(
+    Uniform::HTTP::Request->new(
+        method    => 'GET',
+        target    => '/informational',
+        authority => 'example.test',
+    ),
+    on_informational => sub {
+        $informational = $_[1];
+    },
+    on_response => sub {
+        $final_response = $_[1];
+    },
+);
+$native_client->output;
+
+my $early =
+    "HTTP/1.1 103 Early Hints\r\n" .
+    "Link: </style.css>; rel=preload\r\n\r\n";
+($status, $consumed) = $client_driver->feed($early);
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'persistent client driver accepts informational response';
+is $consumed, length($early),
+    'informational response is fully consumed';
+is ref($informational), 'Uniform::HTTP::Response',
+    'informational native response is canonical';
+is $informational->status, 103,
+    'informational native response preserves status';
+
+my $final = "HTTP/1.1 204 No Content\r\n\r\n";
+($status, $consumed) = $client_driver->feed($final);
+is $status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+    'persistent client driver accepts final response after informational';
+is $consumed, length($final),
+    'final response is fully consumed';
+is ref($final_response), 'Uniform::HTTP::Response',
+    'final native response is canonical';
+is $final_response->status, 204,
+    'final native response preserves status';
+ok $info_tx->is_complete,
+    'informational exchange completes normally';
+
 my @switch;
 my $switch_server = Unblock::HTTP1::Server->new(
     on_request => sub {
