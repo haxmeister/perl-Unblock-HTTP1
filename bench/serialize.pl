@@ -12,6 +12,14 @@ use Unblock::HTTP1::Transaction;
 use Unblock::HTTP1::_Native;
 use Unblock::HTTP1::_Wire;
 
+{
+    package Unblock::HTTP1::Benchmark::PortableRequest;
+    use parent 'Uniform::HTTP::Request';
+
+    package Unblock::HTTP1::Benchmark::PortableResponse;
+    use parent 'Uniform::HTTP::Response';
+}
+
 my $seconds = @ARGV ? shift @ARGV : 2;
 die "usage: $0 [seconds]\n"
     unless defined($seconds) && $seconds =~ /\A[1-9][0-9]*\z/ && !@ARGV;
@@ -32,6 +40,26 @@ my $response = Uniform::HTTP::Response->new(
     body    => 'hello',
 );
 
+my $portable_request =
+    Unblock::HTTP1::Benchmark::PortableRequest->new(
+        method  => 'GET',
+        target  => '/hello?x=1',
+        headers => [
+            [ Host => 'example.test' ],
+            [ 'User-Agent' => 'Unblock-Benchmark' ],
+            [ Accept => '*/*' ],
+        ],
+    );
+
+my $portable_response =
+    Unblock::HTTP1::Benchmark::PortableResponse->new(
+        status  => 200,
+        headers => [ [ 'Content-Type' => 'text/plain' ] ],
+        body    => 'hello',
+    );
+
+my $request_view = Unblock::HTTP1::_Wire::_fast_request_view($request);
+my $response_view = Unblock::HTTP1::_Wire::_fast_response_view($response);
 my $request_fields = Unblock::HTTP1::_Wire::_fields($request, 'header');
 my $response_fields = Unblock::HTTP1::_Wire::_fields($response, 'header');
 
@@ -79,8 +107,18 @@ cmpthese(
             my $fields = Unblock::HTTP1::_Wire::_fields($request, 'header');
             die unless @$fields == 3;
         },
+        request_fields_fast => sub {
+            my $fields =
+                Unblock::HTTP1::_Wire::_fields($request, 'header', $request_view);
+            die unless @$fields == 3;
+        },
         response_fields => sub {
             my $fields = Unblock::HTTP1::_Wire::_fields($response, 'header');
+            die unless @$fields == 1;
+        },
+        response_fields_fast => sub {
+            my $fields =
+                Unblock::HTTP1::_Wire::_fields($response, 'header', $response_view);
             die unless @$fields == 1;
         },
         request_validate => sub {
@@ -122,8 +160,19 @@ cmpthese(
             my $plan = Unblock::HTTP1::_Wire::request_plan($request);
             die unless length $plan->{wire};
         },
+        request_plan_portable => sub {
+            my $plan = Unblock::HTTP1::_Wire::request_plan($portable_request);
+            die unless length $plan->{wire};
+        },
         response_plan => sub {
             my $plan = Unblock::HTTP1::_Wire::response_plan($request, $response);
+            die unless length $plan->{wire};
+        },
+        response_plan_portable => sub {
+            my $plan = Unblock::HTTP1::_Wire::response_plan(
+                $portable_request,
+                $portable_response,
+            );
             die unless length $plan->{wire};
         },
         request_new => sub {
@@ -156,6 +205,16 @@ cmpthese(
             $value->mark_incomplete->freeze_initial;
             die unless $value->method eq 'GET';
         },
+        request_receive_fast => sub {
+            my $value =
+                Unblock::HTTP1::_Wire::_request_from_validated_head(
+                    {
+                        %$request_head,
+                        body_mode => 'content-length',
+                    },
+                );
+            die unless $value->method eq 'GET';
+        },
         response_receive_new => sub {
             my $value = Uniform::HTTP::Response->new(
                 status  => $response_head->{status},
@@ -164,6 +223,13 @@ cmpthese(
                 headers => $response_head->{headers},
             );
             $value->mark_incomplete->freeze_initial;
+            die unless $value->status == 200;
+        },
+        response_receive_fast => sub {
+            my $value =
+                Unblock::HTTP1::_Wire::_response_from_validated_head(
+                    $response_head, 0,
+                );
             die unless $value->status == 200;
         },
         transaction_new => sub {
