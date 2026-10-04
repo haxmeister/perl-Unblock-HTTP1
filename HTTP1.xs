@@ -1087,6 +1087,43 @@ ub_http1_call_engine_head(
     return result;
 }
 
+static int
+ub_http1_input_can_direct_head(ub_http1_input_context *context)
+{
+    HV *engine_hv;
+    SV **value;
+    int active = 0;
+
+    if (context == NULL || context->role == 0
+        || context->engine == NULL || !SvROK(context->engine)
+        || SvTYPE(SvRV(context->engine)) != SVt_PVHV)
+        return 0;
+
+    engine_hv = (HV *)SvRV(context->engine);
+
+    value = hv_fetch(engine_hv, "closed", 6, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "switched", 8, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "input", 5, 0);
+    if (value != NULL && SvOK(*value) && SvCUR(*value) != 0)
+        return 0;
+
+    value = hv_fetch(engine_hv, "rx", 2, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "active", 6, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        active = 1;
+
+    return context->role == 1 ? !active : active;
+}
+
 static void *
 ub_http1_input_create(pTHX_ SV *engine)
 {
@@ -1106,7 +1143,7 @@ ub_http1_input_create(pTHX_ SV *engine)
     );
     context->role = sv_derived_from(engine, "Unblock::HTTP1::Server") ? 1
         : sv_derived_from(engine, "Unblock::HTTP1::Client") ? 2 : 0;
-    context->direct_head = context->role ? 1 : 0;
+    context->direct_head = 0;
     context->max_headers = 100;
     context->max_head_size = 65536;
 
@@ -1122,31 +1159,9 @@ ub_http1_input_create(pTHX_ SV *engine)
         if (value != NULL && SvOK(*value))
             context->max_head_size = (size_t)SvUV(*value);
 
-        if (context->role == 1) {
-            value = hv_fetch(engine_hv, "active", 6, 0);
-            if (value != NULL && SvOK(*value) && SvTRUE(*value))
-                context->direct_head = 0;
-
-            value = hv_fetch(engine_hv, "rx", 2, 0);
-            if (value != NULL && SvOK(*value) && SvTRUE(*value))
-                context->direct_head = 0;
-        } else if (context->role == 2) {
-            value = hv_fetch(engine_hv, "active", 6, 0);
-            if (value == NULL || !SvOK(*value) || !SvTRUE(*value))
-                context->direct_head = 0;
-
-            value = hv_fetch(engine_hv, "rx", 2, 0);
-            if (value != NULL && SvOK(*value) && SvTRUE(*value))
-                context->direct_head = 0;
-        }
-
-        if (context->role) {
-            value = hv_fetch(engine_hv, "input", 5, 0);
-            if (value != NULL && SvOK(*value) && SvCUR(*value) != 0)
-                context->direct_head = 0;
-        }
     }
 
+    context->direct_head = ub_http1_input_can_direct_head(context);
     return context;
 }
 
@@ -1176,6 +1191,8 @@ ub_http1_input_borrowed(
     *consumed = 0;
     if (data == NULL)
         data = "";
+
+    context->direct_head = ub_http1_input_can_direct_head(context);
 
     if (context->direct_head && context->role == 1) {
         head = ub_http1_parse_request_head_result(
