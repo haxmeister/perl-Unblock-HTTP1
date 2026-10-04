@@ -15,3 +15,7 @@ Revision history for Unblock-HTTP1
     - HTTP/1.0 persistence and close-delimited streaming parity.
     - EOF truncation, cancellation, early-final-response, and backpressure tests.
     - Expanded framing, fragmentation, queue/reuse, and configured-limit tests.
+    - Cross-platform CI on Linux, macOS, and Windows with Perl 5.16 coverage.
+    - Standalone parse, serialization, fixed-body, chunked-body, and loopback
+      benchmarks for optimization work.
+    - Fast paths for common HTTP/1.1 request and response serialization plans.
