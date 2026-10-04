@@ -117,6 +117,18 @@ subtest 'asterisk and basic request-target forms are validated' => sub {
         "Host: example.test\r\n\r\n"
     );
     ok($absolute->{ok}, 'absolute-form is accepted');
+
+    my $userinfo = parse(
+        "GET http://user\@example.test/path HTTP/1.1\r\n" .
+        "Host: example.test\r\n\r\n"
+    );
+    ok(!$userinfo->{ok}, 'http absolute-form userinfo is rejected on receipt');
+
+    my $missing_authority = parse(
+        "GET http:path HTTP/1.1\r\nHost: \r\n\r\n"
+    );
+    ok(!$missing_authority->{ok},
+        'http absolute-form without authority is rejected on receipt');
 };
 
 subtest 'outgoing request target uses the same form rules' => sub {
@@ -201,6 +213,19 @@ subtest 'outgoing request target uses the same form rules' => sub {
     ok(!$userinfo_ok, 'http absolute-form userinfo is rejected');
     like($@, qr/must not contain userinfo/,
         'userinfo rejection is explicit');
+
+    my $missing_authority_out = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => 'http:path',
+        headers => [ [ Host => '' ] ],
+    );
+    my $missing_authority_ok = eval {
+        Unblock::HTTP1::_Wire::request_plan($missing_authority_out);
+        1;
+    };
+    ok(!$missing_authority_ok, 'outgoing http absolute-form requires authority');
+    like($@, qr/requires an authority/,
+        'missing authority error is explicit');
 
     my $space = Uniform::HTTP::Request->new(
         method  => 'GET',
