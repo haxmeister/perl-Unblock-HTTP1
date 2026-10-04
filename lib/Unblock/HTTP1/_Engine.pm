@@ -67,11 +67,11 @@ sub input {
 }
 
 sub _input_borrowed {
-    my ($self, $window, $length) = @_;
+    my ($self, $window, $length, $head) = @_;
     croak '_input_borrowed(): cannot be called recursively from an engine callback'
         if $self->{driving};
-    return (4, 0) if $self->{switched};
-    return (3, 0) if $self->{closed};
+    return (4, 0, 0) if $self->{switched};
+    return (3, 0, 0) if $self->{closed};
     croak '_input_borrowed(): cannot mix borrowed input with buffered portable input'
         if length $self->{input};
 
@@ -80,6 +80,7 @@ sub _input_borrowed {
         local $self->{borrowed_input} = $window;
         local $self->{borrowed_length} = $length;
         local $self->{borrowed_offset} = 0;
+        local $self->{borrowed_head} = $head;
         local $self->{driving} = 1;
         $self->_drive;
 
@@ -97,9 +98,9 @@ sub _input_borrowed {
             $status = 0;
         }
         $consumed = $self->{borrowed_offset};
+        my $head_ready = $self->_borrowed_native_head_ready;
+        return ($status, $consumed, $head_ready);
     }
-
-    return ($status, $consumed);
 }
 
 sub _borrowed_input_eof {
@@ -169,6 +170,7 @@ sub _input_remaining {
 }
 
 sub _borrowed_should_buffer_tail { 0 }
+sub _borrowed_native_head_ready { 0 }
 
 sub input_eof {
     my ($self) = @_;
