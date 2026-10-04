@@ -109,9 +109,9 @@ subtest 'coalesced fixed request matches fragmented request lifecycle' => sub {
     );
     is($coalesced_body, 'abc', 'coalesced request body bytes are exact');
     is($fragmented_body, 'abc', 'fragmented request body bytes are exact');
-    ok(!grep { $_ } @$coalesced_body_state,
+    ok(!(grep { $_ } @$coalesced_body_state),
         'coalesced body callbacks observe an incomplete request');
-    ok(!grep { $_ } @$fragmented_body_state,
+    ok(!(grep { $_ } @$fragmented_body_state),
         'fragmented body callbacks observe an incomplete request');
     is($fragmented_wire, $coalesced_wire,
         'coalesced and fragmented requests produce identical response wire');
@@ -183,9 +183,9 @@ subtest 'coalesced fixed response matches fragmented response lifecycle' => sub 
     );
     is($coalesced_body, 'abc', 'coalesced response body bytes are exact');
     is($fragmented_body, 'abc', 'fragmented response body bytes are exact');
-    ok(!grep { $_ } @$coalesced_body_state,
+    ok(!(grep { $_ } @$coalesced_body_state),
         'coalesced body callbacks observe an incomplete response');
-    ok(!grep { $_ } @$fragmented_body_state,
+    ok(!(grep { $_ } @$fragmented_body_state),
         'fragmented body callbacks observe an incomplete response');
     ok($coalesced_tx->is_complete, 'coalesced response transaction completes');
     ok($fragmented_tx->is_complete, 'fragmented response transaction completes');
