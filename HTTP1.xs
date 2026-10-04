@@ -658,6 +658,7 @@ typedef struct {
 typedef struct {
     SV *engine;
     CV *input_cv;
+    CV *head_cv;
     CV *eof_cv;
     int role;
     int direct_head;
@@ -839,6 +840,55 @@ ub_http1_call_engine_input(
     return result;
 }
 
+static int
+ub_http1_call_engine_head(
+    pTHX_
+    ub_http1_input_context *context,
+    SV *head,
+    int *head_ready
+)
+{
+    CV *cv = ub_http1_engine_method_cv(
+        aTHX_ context, &context->head_cv, "_input_native_head"
+    );
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    SV *ready_sv;
+    SV *status_sv;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    XPUSHs(head);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    } else {
+        if (count != 2)
+            croak("Unblock::HTTP1 native head dispatch returned the wrong number of values");
+        ready_sv = POPs;
+        status_sv = POPs;
+        *head_ready = SvTRUE(ready_sv) ? 1 : 0;
+        result = SvIV(status_sv);
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
 static void *
 ub_http1_input_create(pTHX_ SV *engine)
 {
@@ -904,6 +954,7 @@ ub_http1_input_borrowed(
     SV *head = NULL;
     SV *window_arg = &PL_sv_undef;
     int head_ready = 0;
+    int head_only = 0;
     int need_window = 1;
     int result;
 
@@ -939,13 +990,42 @@ ub_http1_input_borrowed(
                 if (consumed_sv != NULL && SvOK(*consumed_sv)) {
                     UV head_consumed = SvUV(*consumed_sv);
                     if (head_consumed <= (UV)length
-                        && head_consumed == (UV)length)
+                        && head_consumed == (UV)length) {
                         need_window = 0;
+                        head_only = 1;
+                    }
                 }
             } else {
                 need_window = 0;
             }
         }
+    }
+
+    if (head_only) {
+        int jump_status;
+        dJMPENV;
+
+        *consumed = length;
+        JMPENV_PUSH(jump_status);
+        if (jump_status == 0) {
+            result = ub_http1_call_engine_head(
+                aTHX_ context, head, &head_ready
+            );
+            JMPENV_POP;
+        } else {
+            JMPENV_POP;
+            SvREFCNT_dec(head);
+            JMPENV_JUMP(jump_status);
+        }
+
+        SvREFCNT_dec(head);
+
+        if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
+            || result == 2)
+            croak("Unblock::HTTP1 engine returned invalid native input status");
+
+        context->direct_head = head_ready;
+        return result;
     }
 
     if (need_window) {
@@ -1051,6 +1131,8 @@ ub_http1_input_destroy(pTHX_ void *opaque)
 
     if (context->input_cv != NULL)
         SvREFCNT_dec((SV *)context->input_cv);
+    if (context->head_cv != NULL)
+        SvREFCNT_dec((SV *)context->head_cv);
     if (context->eof_cv != NULL)
         SvREFCNT_dec((SV *)context->eof_cv);
     if (context->engine != NULL)
