@@ -870,6 +870,20 @@ ub_http1_input_create(pTHX_ SV *engine)
         value = hv_fetch(engine_hv, "max_head_size", 13, 0);
         if (value != NULL && SvOK(*value))
             context->max_head_size = (size_t)SvUV(*value);
+
+        if (context->role == 1) {
+            value = hv_fetch(engine_hv, "active", 6, 0);
+            if (value != NULL && SvOK(*value) && SvTRUE(*value))
+                context->direct_head = 0;
+
+            value = hv_fetch(engine_hv, "rx", 2, 0);
+            if (value != NULL && SvOK(*value) && SvTRUE(*value))
+                context->direct_head = 0;
+
+            value = hv_fetch(engine_hv, "input", 5, 0);
+            if (value != NULL && SvOK(*value) && SvCUR(*value) != 0)
+                context->direct_head = 0;
+        }
     }
 
     return context;
