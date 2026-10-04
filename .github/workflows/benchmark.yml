@@ -1,0 +1,39 @@
+name: benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/http1-parity
+    paths:
+      - 'bench/**'
+      - '.github/workflows/benchmark.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: 'latest'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest --installdeps .
+
+      - name: Build
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Run standalone benchmark
+        shell: bash
+        run: perl -Mblib bench/http1.pl 1
