@@ -702,15 +702,19 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::Chunked
 
 SV *
-new(CLASS)
+new(CLASS, max_chunk_extension_size = 16384)
     const char *CLASS
+    UV max_chunk_extension_size
   PREINIT:
     struct phr_chunked_decoder *decoder;
     SV *inner;
     SV *obj;
   CODE:
+    if (max_chunk_extension_size > (UV)SIZE_MAX)
+        croak("max_chunk_extension_size exceeds native size range");
     Newxz(decoder, 1, struct phr_chunked_decoder);
     decoder->consume_trailer = 0;
+    decoder->_max_chunk_ext_size = (size_t)max_chunk_extension_size;
     inner = newSViv(PTR2IV(decoder));
     obj = newRV_noinc(inner);
     sv_bless(obj, gv_stashpv(CLASS, GV_ADD));
