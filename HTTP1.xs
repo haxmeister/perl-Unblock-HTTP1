@@ -305,18 +305,21 @@ parse_content_length(const char *value, size_t len, UV *out, int *seen)
     return members != 0;
 }
 
-static void
+static int
 parse_connection(const char *value, size_t len, int *close_seen, int *keep_seen)
 {
     size_t pos = 0;
     while (pos < len) {
-        size_t start, end;
+        size_t start, end, i;
         while (pos < len && is_ows((unsigned char)value[pos])) ++pos;
         start = pos;
         while (pos < len && value[pos] != ',') ++pos;
         end = pos;
         while (end > start && is_ows((unsigned char)value[end - 1])) --end;
         if (end > start) {
+            for (i = start; i < end; ++i)
+                if (!is_tchar((unsigned char)value[i]))
+                    return 0;
             if (ascii_equal_ci(value + start, end - start, "close", 5))
                 *close_seen = 1;
             else if (ascii_equal_ci(value + start, end - start, "keep-alive", 10))
@@ -324,6 +327,7 @@ parse_connection(const char *value, size_t len, int *close_seen, int *keep_seen)
         }
         if (pos < len) ++pos;
     }
+    return 1;
 }
 
 static int
@@ -529,7 +533,9 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
                     error = "invalid Transfer-Encoding"; error_status = 400;
                 }
             } else if (ascii_equal_ci(name, name_len, "Connection", 10)) {
-                parse_connection(value, value_len, &close_seen, &keep_seen);
+                if (!parse_connection(value, value_len, &close_seen, &keep_seen)) {
+                    error = "invalid Connection field"; error_status = 400;
+                }
             } else if (ascii_equal_ci(name, name_len, "Expect", 6)) {
                 int e = parse_expect(value, value_len);
                 if (minor == 0) {
