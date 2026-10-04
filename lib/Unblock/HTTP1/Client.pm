@@ -305,8 +305,22 @@ sub _retire_if_done {
     $tx->_mark_complete unless $tx->is_terminal;
     my $cb = $tx->_invoke('on_complete');
     return $self->_connection_error($cb) unless $cb eq '1';
+
     my $keep = $tx->{keep_alive} && $tx->{send_plan}{keep_alive};
+    my $extra = length($self->{input}) ? 1 : 0;
     $self->{active} = undef;
+
+    # This client serializes requests and never pipelines them. Therefore,
+    # bytes already received beyond a final response boundary cannot belong to
+    # a later response. Do not retain them for a future request: doing so would
+    # allow an unsolicited response to poison the response queue.
+    if ($extra) {
+        $self->{input} = '';
+        $self->{closed} = 1;
+        $self->_fail_queued('unexpected bytes after final HTTP/1 response');
+        return;
+    }
+
     if (!$keep) {
         $self->{closed} = 1;
         $self->_fail_queued('HTTP/1 connection is not reusable');
