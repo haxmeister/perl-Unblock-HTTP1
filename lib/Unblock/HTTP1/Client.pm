@@ -124,6 +124,7 @@ sub _drive {
         if (!$rx) {
             my $head = delete $self->{borrowed_head};
             my $response = delete $self->{borrowed_message};
+            my $native_response = $response ? 1 : 0;
             if (!$head) {
                 my ($input, $offset) = $self->_input_window;
                 $head = Unblock::HTTP1::_Native->parse_response_head(
@@ -153,7 +154,11 @@ sub _drive {
 
             my $plan;
             my $ok = eval {
-                $plan = Unblock::HTTP1::_Wire::response_receive_plan($tx->request, $head);
+                $plan = Unblock::HTTP1::_Wire::response_receive_plan(
+                    $tx->request,
+                    $head,
+                    $native_response ? $response : undef,
+                );
                 1;
             };
             return $self->_connection_error("$@") unless $ok;
