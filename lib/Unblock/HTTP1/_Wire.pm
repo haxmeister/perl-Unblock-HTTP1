@@ -281,7 +281,25 @@ sub _authority_form {
 
     croak 'CONNECT target port must be between 1 and 65535'
         if $port < 1 || $port > 65_535;
-    return "$host:$port";
+    return wantarray ? ($host, 0 + $port) : "$host:$port";
+}
+
+sub _connect_host {
+    my ($value) = @_;
+    $value = _trim(_bytes('CONNECT Host', $value));
+
+    my ($host, $port);
+    if ($value =~ /\A(\[[^\]\s]+\])(?::([0-9]+))?\z/) {
+        ($host, $port) = ($1, $2);
+    } elsif ($value =~ /\A([^:\s\/?#@]+)(?::([0-9]+))?\z/) {
+        ($host, $port) = ($1, $2);
+    } else {
+        croak 'CONNECT Host must contain a valid host with an optional port';
+    }
+
+    croak 'CONNECT Host port must be between 1 and 65535'
+        if defined($port) && ($port < 1 || $port > 65_535);
+    return ($host, defined($port) ? 0 + $port : undef);
 }
 
 sub _validate_request_target {
@@ -342,11 +360,14 @@ sub _validate_connect_request {
     croak 'CONNECT request must not contain Transfer-Encoding'
         if @{ _values($fields, 'Transfer-Encoding') };
 
-    my $authority = _authority_form($request->target);
+    my ($target_host, $target_port) = _authority_form($request->target);
     my $host = _values($fields, 'Host');
     croak 'CONNECT requires exactly one Host field' unless @$host == 1;
-    croak 'CONNECT Host must match the authority-form request target'
-        if _lc(_trim($host->[0])) ne _lc($authority);
+
+    my ($host_name, $host_port) = _connect_host($host->[0]);
+    croak 'CONNECT Host must identify the authority-form request target'
+        if _lc($host_name) ne _lc($target_host)
+        || (defined($host_port) && $host_port != $target_port);
     return;
 }
 
