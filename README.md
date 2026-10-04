@@ -202,12 +202,13 @@ native parser also has a hard ceiling of 256 header fields per parsed section.
 
 ## Development status
 
-The distribution is under active development and has not been released.
+The distribution has not yet been released.
 
-The initial suite exercises client/server exchanges entirely in memory so the
-core cannot accidentally depend on a particular socket type or event loop.
-Linux::Event::HTTP integration should happen after this standalone boundary is
-stable.
+The standalone protocol boundary is now stable enough for integration work.
+Its suite exercises client/server exchanges entirely in memory so the core
+cannot accidentally depend on a particular socket type or event loop.
+Linux::Event::HTTP can integrate through the public byte API without adding
+Linux-specific behavior here.
 
 ## License
 
