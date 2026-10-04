@@ -116,6 +116,8 @@ sub _connection_tokens {
             $member =~ s/\A[ \t]+//;
             $member =~ s/[ \t]+\z//;
             next unless length $member;
+            croak 'invalid Connection option'
+                unless $member =~ /\A[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+\z/;
             $seen{ _lc($member) } = 1;
         }
     }
