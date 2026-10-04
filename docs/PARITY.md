@@ -11,14 +11,22 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 ### Parsing and framing
 
 - HTTP/1.0 and HTTP/1.1 request and response heads.
+- Case-sensitive HTTP method semantics.
 - Exact request-target bytes.
+- Origin-form, absolute-form, CONNECT authority-form, and OPTIONS asterisk-form
+  request-target validation.
+- HTTP/1.1 absolute-form Host generation and authority matching.
 - Ordered duplicate header fields.
 - Configurable head and header-count limits.
 - Content-Length request and response framing.
 - Identical repeated or comma-combined request Content-Length values.
 - Conflicting and overflowing Content-Length rejection.
+- Numerically equivalent Content-Length spellings are normalized consistently.
 - Transfer-Encoding plus Content-Length rejection.
 - Strict request chunked-coding rules.
+- HTTP/1.0 Transfer-Encoding rejection.
+- Response framing with preceding transfer codings and non-chunked final
+  transfer codings.
 - Obsolete folded request fields rejected.
 - HTTP/1.1 Host requirements and persistence rules.
 - HTTP/1.0 keep-alive rules.
@@ -59,6 +67,8 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Unknown-length HTTP/1.0 streaming responses are close-delimited.
 - Client requests are queued serially; pipelining is never enabled silently.
 - A non-reusable response fails queued requests instead of serializing them.
+- Bytes beyond a completed final client response are never treated as a queued
+  response on the non-pipelining client connection.
 - Explicit cancellation of a partial response closes the connection without
   converting cancellation into a protocol error.
 - An early final response retires an unfinished streaming request body and
