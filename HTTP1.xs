@@ -561,6 +561,61 @@ ub_http1_call_engine_scalar(
     return result;
 }
 
+static int
+ub_http1_call_engine_input(
+    pTHX_
+    ub_http1_input_context *context,
+    SV *window,
+    size_t length,
+    size_t *consumed
+)
+{
+    CV *cv = ub_http1_engine_method_cv(
+        aTHX_ context, &context->input_cv, "_input_borrowed"
+    );
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    SV *consumed_sv;
+    SV *status_sv;
+    UV consumed_uv;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    XPUSHs(window);
+    mPUSHu((UV)length);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    } else {
+        if (count != 2)
+            croak("Unblock::HTTP1 native input returned the wrong number of values");
+        consumed_sv = POPs;
+        status_sv = POPs;
+        consumed_uv = SvUV(consumed_sv);
+        if (consumed_uv > (UV)length)
+            croak("Unblock::HTTP1 native input consumed beyond its window");
+        *consumed = (size_t)consumed_uv;
+        result = SvIV(status_sv);
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
 static void *
 ub_http1_input_create(pTHX_ SV *engine)
 {
@@ -611,15 +666,10 @@ ub_http1_input_borrowed(
     sv_bless(object,
         gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
 
-    result = ub_http1_call_engine_scalar(
-        aTHX_
-        context,
-        &context->input_cv,
-        "_input_borrowed",
-        object
+    result = ub_http1_call_engine_input(
+        aTHX_ context, object, length, consumed
     );
 
-    *consumed = window->offset;
     window->valid = 0;
     SvREFCNT_dec(object);
 
@@ -1080,6 +1130,25 @@ DESTROY(self)
     sv_setiv(inner, 0);
 
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedWindow
+
+SV *
+slice(self, offset, length)
+    SV *self
+    UV offset
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    if (offset > (UV)window->length
+        || length > (UV)(window->length - (size_t)offset))
+        croak("borrowed input slice exceeds window");
+    RETVAL = newSVpvn(
+        window->data + (size_t)offset,
+        (STRLEN)length
+    );
+  OUTPUT:
+    RETVAL
 
 UV
 remaining(self)
