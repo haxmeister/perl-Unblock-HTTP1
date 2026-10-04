@@ -14,7 +14,8 @@ The same engine can be used with any reliable ordered byte stream.
 The normal API accepts Perl byte strings. XS-backed transports can optionally
 use `Unblock::HTTP1::NativeABI` to feed borrowed native buffers directly. The
 transport keeps ownership of the buffer and Unblock reports how much of it was
-consumed.
+consumed. On this path, received requests and responses are constructed as
+canonical Uniform::HTTP objects through the Uniform::HTTP 0.06 native FastPath.
 
 ## What it does
 
