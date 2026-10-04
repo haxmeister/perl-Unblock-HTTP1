@@ -1,0 +1,61 @@
+name: benchmark-linux-event
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/http1-parity
+    paths:
+      - 'bench/compare-linux-event.pl'
+      - '.github/workflows/benchmark-linux-event.yml'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Unblock::HTTP1
+        uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: 'latest'
+
+      - name: Install Unblock dependencies
+        shell: bash
+        run: |
+          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest --installdeps .
+
+      - name: Build Unblock::HTTP1
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Check out current Linux::Event::HTTP
+        uses: actions/checkout@v4
+        with:
+          repository: haxmeister/perl-Linux-Event-HTTP
+          ref: main
+          path: linux-http
+
+      - name: Install Linux::Event::HTTP dependencies
+        shell: bash
+        run: cpanm --notest --installdeps ./linux-http
+
+      - name: Build Linux::Event::HTTP
+        shell: bash
+        run: |
+          cd linux-http
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Compare receive paths
+        shell: bash
+        run: |
+          export PERL5LIB="$GITHUB_WORKSPACE/linux-http/blib/lib:$GITHUB_WORKSPACE/linux-http/blib/arch${PERL5LIB:+:$PERL5LIB}"
+          perl -Mblib bench/compare-linux-event.pl 1
