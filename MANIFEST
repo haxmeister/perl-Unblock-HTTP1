@@ -5,13 +5,8 @@ MANIFEST
 MANIFEST.SKIP
 Makefile.PL
 README.md
-bench/README.md
-bench/http1.pl
-bench/serialize.pl
-docs/ARCHITECTURE.md
 docs/INTEGRATION.md
-docs/PARITY.md
-docs/TRUSTED_UNIFORM.md
+docs/PROTOCOL_STATUS.md
 lib/Unblock/HTTP1.pm
 lib/Unblock/HTTP1/Client.pm
 lib/Unblock/HTTP1/Server.pm
