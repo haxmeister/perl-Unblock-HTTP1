@@ -47,6 +47,11 @@ The useful comparison before Linux::Event integration is:
 9. client-only and server-only HTTP/1 cycles;
 10. common-path versus full-planner buffered serialization.
 
-After the standalone engine is stable, compare the same operations with the
-current Linux::Event::HTTP HTTP/1 implementation and use profiles to decide
-which additional serialization or state transitions are worth moving into XS.
+The Linux::Event comparison workflow also measures receive-side Uniform object
+materialization. Its trusted-shape cases are diagnostics only: they estimate
+the ceiling of a future sanctioned trusted-construction API and deliberately
+must not be used by production engine code. See docs/TRUSTED_UNIFORM.md.
+
+After the standalone engine is stable, use the cross-engine comparisons and
+profiles to decide which additional serialization or state transitions are
+worth moving into XS.
