@@ -15,11 +15,9 @@ WriteMakefile(
     PREREQ_PM => {
         'Carp'          => 0,
         'Scalar::Util'  => 0,
+        'Test::More'    => 0,
         'Uniform::HTTP' => '0.04',
         'XSLoader'      => 0,
-    },
-    TEST_REQUIRES => {
-        'Test::More' => 0,
     },
     XS => { 'HTTP1.xs' => 'HTTP1.c' },
     clean => { FILES => 'HTTP1.c' },
