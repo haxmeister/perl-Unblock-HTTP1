@@ -44,7 +44,7 @@ Any future trusted construction API must:
 - preserve normal Uniform lifecycle semantics;
 - support ownership transfer of freshly parsed header/trailer arrays without
   requiring unnecessary deep copies;
-- remain independent of HTTP/1, HTTP/2, HTTP/3, Linux::Event, and any event
+- remain independent of HTTP/1, HTTP/2, HTTP/3, any framework, and any event
   loop;
 - fail clearly when its trusted-input contract is violated by the caller;
 - remain an implementation detail for protocol engines rather than a shortcut
