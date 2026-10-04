@@ -63,7 +63,7 @@ subtest 'client response head limit is terminal protocol error' => sub {
 
 subtest 'chunk trailer limit is enforced independently' => sub {
     my $error;
-    my $client = Unblock::HTTP1::Client->new(max_head_size => 32);
+    my $client = Unblock::HTTP1::Client->new(max_head_size => 64);
     my $tx = $client->request(
         Uniform::HTTP::Request->new(
             method => 'GET',
@@ -75,7 +75,7 @@ subtest 'chunk trailer limit is enforced independently' => sub {
     $client->output;
     $client->input(
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" .
-        "1\r\nx\r\n0\r\nX-Trailer: " . ('y' x 40) . "\r\n\r\n"
+        "1\r\nx\r\n0\r\nX-Trailer: " . ('y' x 80) . "\r\n\r\n"
     );
     like($error, qr/trailer section exceeds configured limit/i,
         'oversized trailer section is rejected');
