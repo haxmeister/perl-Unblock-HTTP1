@@ -109,6 +109,108 @@ valid_host_value(const char *value, size_t len)
 }
 
 static int
+ascii_equal_cs(const char *left, size_t left_len, const char *right, size_t right_len)
+{
+    return left_len == right_len && memEQ(left, right, right_len);
+}
+
+static int
+valid_port_number(const char *value, size_t len)
+{
+    size_t i;
+    unsigned int port = 0;
+    if (len == 0) return 0;
+    for (i = 0; i < len; ++i) {
+        unsigned int digit;
+        if (value[i] < '0' || value[i] > '9') return 0;
+        digit = (unsigned int)(value[i] - '0');
+        if (port > 6553 || (port == 6553 && digit > 5)) return 0;
+        port = port * 10 + digit;
+    }
+    return port != 0;
+}
+
+static int
+valid_connect_authority(const char *target, size_t len)
+{
+    size_t i;
+    if (len < 3) return 0;
+
+    if (target[0] == '[') {
+        size_t close_bracket = (size_t)-1;
+        for (i = 1; i < len; ++i) {
+            if (target[i] == ']') {
+                close_bracket = i;
+                break;
+            }
+        }
+        if (close_bracket == (size_t)-1 || close_bracket == 1) return 0;
+        if (close_bracket + 2 >= len || target[close_bracket + 1] != ':')
+            return 0;
+        for (i = 1; i < close_bracket; ++i) {
+            unsigned char ch = (unsigned char)target[i];
+            if (ch <= 0x20 || ch == 0x7f ||
+                ch == '/' || ch == '?' || ch == '#' || ch == '@')
+                return 0;
+        }
+        return valid_port_number(
+            target + close_bracket + 2,
+            len - close_bracket - 2
+        );
+    }
+
+    {
+        size_t colon = (size_t)-1;
+        for (i = 0; i < len; ++i) {
+            unsigned char ch = (unsigned char)target[i];
+            if (ch <= 0x20 || ch == 0x7f ||
+                ch == '/' || ch == '?' || ch == '#' || ch == '@')
+                return 0;
+            if (target[i] == ':') {
+                if (colon != (size_t)-1) return 0;
+                colon = i;
+            }
+        }
+        if (colon == (size_t)-1 || colon == 0 || colon + 1 == len) return 0;
+        return valid_port_number(target + colon + 1, len - colon - 1);
+    }
+}
+
+static int
+valid_request_target(const char *method, size_t method_len,
+                     const char *target, size_t target_len)
+{
+    size_t i;
+    if (target_len == 0) return 0;
+
+    for (i = 0; i < target_len; ++i)
+        if (target[i] == '#') return 0;
+
+    if (target_len == 1 && target[0] == '*')
+        return ascii_equal_cs(method, method_len, "OPTIONS", 7);
+
+    if (ascii_equal_cs(method, method_len, "CONNECT", 7))
+        return valid_connect_authority(target, target_len);
+
+    if (target[0] == '/') return 1;
+
+    if (!((target[0] >= 'A' && target[0] <= 'Z') ||
+          (target[0] >= 'a' && target[0] <= 'z')))
+        return 0;
+
+    for (i = 1; i < target_len; ++i) {
+        unsigned char ch = (unsigned char)target[i];
+        if (ch == ':') return 1;
+        if (!((ch >= 'A' && ch <= 'Z') ||
+              (ch >= 'a' && ch <= 'z') ||
+              (ch >= '0' && ch <= '9') ||
+              ch == '+' || ch == '-' || ch == '.'))
+            return 0;
+    }
+    return 0;
+}
+
+static int
 parse_content_length(const char *value, size_t len, UV *out, int *seen)
 {
     size_t pos = 0;
@@ -305,6 +407,9 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
     int keep_seen = 0;
     int expect_mode = 0;
     int body_mode = UB_BODY_NONE;
+    int is_connect = 0;
+    const char *host_value = NULL;
+    size_t host_value_len = 0;
     HV *hv;
     AV *list;
   CODE:
@@ -331,6 +436,15 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
     } else {
         const char *error = NULL;
         int error_status = 0;
+        is_connect = ascii_equal_cs(method, method_len, "CONNECT", 7);
+        if (!valid_request_target(method, method_len, target, target_len)) {
+            error = "invalid HTTP/1 request target";
+            error_status = 400;
+        }
+        if (!error && is_connect && minor != 1) {
+            error = "CONNECT requires HTTP/1.1";
+            error_status = 400;
+        }
         for (i = 0; i < count && !error; ++i) {
             const char *name = headers[i].name;
             size_t name_len = headers[i].name_len;
@@ -338,6 +452,10 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             size_t value_len = headers[i].value_len;
             if (ascii_equal_ci(name, name_len, "Host", 4)) {
                 ++host_count;
+                if (host_count == 1) {
+                    host_value = value;
+                    host_value_len = value_len;
+                }
                 if (!valid_host_value(value, value_len)) {
                     error = "invalid Host field"; error_status = 400;
                 }
@@ -367,6 +485,13 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
         }
         if (!error && te_present && has_cl) {
             error = "Transfer-Encoding and Content-Length cannot be combined"; error_status = 400;
+        }
+        if (!error && is_connect && (te_present || has_cl)) {
+            error = "CONNECT request must not contain content framing"; error_status = 400;
+        }
+        if (!error && is_connect && host_count == 1 &&
+            !ascii_equal_ci(host_value, host_value_len, target, target_len)) {
+            error = "CONNECT Host must match request target"; error_status = 400;
         }
         if (!error && te_present) {
             if (chunked_count != 1 || !final_chunked) {
