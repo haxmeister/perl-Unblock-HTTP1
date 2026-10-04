@@ -114,6 +114,122 @@ sub _transfer_encoding {
     return ['chunked'];
 }
 
+
+sub _trim {
+    my ($value) = @_;
+    $value =~ s/\A[ \t]+//;
+    $value =~ s/[ \t]+\z//;
+    return $value;
+}
+
+sub _authority_form {
+    my ($target) = @_;
+    $target = _bytes('CONNECT target', $target);
+
+    my ($host, $port);
+    if ($target =~ /\A(\[[^\]\s]+\]):([0-9]+)\z/) {
+        ($host, $port) = ($1, $2);
+    } elsif ($target =~ /\A([^:\s\/?#@]+):([0-9]+)\z/) {
+        ($host, $port) = ($1, $2);
+    } else {
+        croak 'CONNECT target must be an authority-form host:port';
+    }
+
+    croak 'CONNECT target port must be between 1 and 65535'
+        if $port < 1 || $port > 65_535;
+    return "$host:$port";
+}
+
+sub _upgrade_tokens {
+    my ($where, $fields) = @_;
+    my @token;
+    for my $value (@{ _values($fields, 'Upgrade') }) {
+        for my $member (split /,/, $value, -1) {
+            $member = _trim($member);
+            croak "invalid $where Upgrade field value"
+                if $member eq ''
+                || $member !~ /\A[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+(?:\/[!#\$%&'*+\-.^_\x60|~0-9A-Za-z]+)?\z/;
+            push @token, _lc($member);
+        }
+    }
+    return \@token;
+}
+
+sub _validate_connect_request {
+    my ($request, $fields, $version, $body, $stream_body, $trailers) = @_;
+    return unless uc($request->method) eq 'CONNECT';
+
+    croak 'CONNECT requires HTTP/1.1' unless $version eq '1.1';
+    croak 'CONNECT cannot use a streaming request body' if $stream_body;
+    croak 'CONNECT request must not contain a buffered body' if defined $body;
+    croak 'CONNECT request must not contain trailers' if $trailers && @$trailers;
+    croak 'CONNECT request must not contain Content-Length'
+        if @{ _values($fields, 'Content-Length') };
+    croak 'CONNECT request must not contain Transfer-Encoding'
+        if @{ _values($fields, 'Transfer-Encoding') };
+
+    my $authority = _authority_form($request->target);
+    my $host = _values($fields, 'Host');
+    croak 'CONNECT requires exactly one Host field' unless @$host == 1;
+    croak 'CONNECT Host must match the authority-form request target'
+        if _lc(_trim($host->[0])) ne _lc($authority);
+    return;
+}
+
+sub _validate_upgrade_request {
+    my ($request, $fields, $version) = @_;
+    croak 'HTTP/1 Upgrade requires HTTP/1.1' unless $version eq '1.1';
+
+    my $connection = _connection_tokens($fields);
+    croak 'HTTP/1 Upgrade request requires Connection: Upgrade'
+        unless $connection->{upgrade};
+    croak 'HTTP/1 Upgrade request cannot combine Connection: close with Upgrade'
+        if $connection->{close};
+
+    my $offered = _upgrade_tokens('request', $fields);
+    croak 'HTTP/1 Upgrade request requires an Upgrade field' unless @$offered;
+
+    my $cl = _content_length($fields);
+    croak 'HTTP/1 Upgrade request body must be empty'
+        if defined($cl) && $cl != 0;
+    croak 'HTTP/1 Upgrade request cannot use Transfer-Encoding'
+        if @{ _values($fields, 'Transfer-Encoding') };
+    croak 'HTTP/1 Upgrade request body must be empty'
+        if $request->has_buffered_body
+            && defined($request->body) && length($request->body);
+    return $offered;
+}
+
+sub _validate_upgrade_response {
+    my ($request, $request_fields, $response_fields, $response_version) = @_;
+    croak 'HTTP/1 Upgrade response must use HTTP/1.1'
+        unless $response_version eq '1.1';
+
+    my $offered = _validate_upgrade_request(
+        $request, $request_fields, $request->version || '1.1',
+    );
+
+    croak 'HTTP/1 Upgrade response cannot contain Content-Length'
+        if @{ _values($response_fields, 'Content-Length') };
+    croak 'HTTP/1 Upgrade response cannot contain Transfer-Encoding'
+        if @{ _values($response_fields, 'Transfer-Encoding') };
+
+    my $connection = _connection_tokens($response_fields);
+    croak 'HTTP/1 Upgrade response requires Connection: Upgrade'
+        unless $connection->{upgrade};
+    croak 'HTTP/1 Upgrade response cannot combine Connection: close with Upgrade'
+        if $connection->{close};
+
+    my $selected = _upgrade_tokens('response', $response_fields);
+    croak 'HTTP/1 Upgrade response must select a protocol' unless @$selected;
+    my %offered = map { $_ => 1 } @$offered;
+    for my $protocol (@$selected) {
+        croak "HTTP/1 Upgrade response selected protocol not offered by request: $protocol"
+            unless $offered{$protocol};
+    }
+    return;
+}
+
 sub _replace_or_add {
     my ($fields, $name, $value) = @_;
     my $key = _lc($name);
@@ -184,6 +300,11 @@ sub request_plan {
 
     my $trailers = _fields($request, 'trailer');
     my $has_trailers = @$trailers ? 1 : 0;
+
+    _validate_connect_request(
+        $request, $fields, $version, $body, $stream_body, $trailers,
+    );
+
     my ($mode, $remaining);
 
     if ($has_trailers) {
@@ -246,15 +367,48 @@ sub response_receive_plan {
     my $fields = $head->{headers};
     my $status = $head->{status};
     my $method = $request->method;
+
+    if (uc($method) eq 'CONNECT' && $status >= 200 && $status < 300) {
+        croak 'HTTP/1 CONNECT successful response must use HTTP/1.1'
+            unless $head->{version} eq '1.1';
+        return {
+            mode       => 'none',
+            remaining  => undef,
+            switch     => 1,
+            keep_alive => 0,
+        };
+    }
+
+    if ($status == 101) {
+        _validate_upgrade_response(
+            $request,
+            _fields($request, 'header'),
+            $fields,
+            $head->{version},
+        );
+        return {
+            mode       => 'none',
+            remaining  => undef,
+            switch     => 1,
+            keep_alive => 0,
+        };
+    }
+
     my $cl = _content_length($fields);
     my $te = _transfer_encoding($fields);
     croak 'response contains both Transfer-Encoding and Content-Length'
         if @$te && defined $cl;
 
-    my $switch = ($status == 101 || ($method eq 'CONNECT' && $status >= 200 && $status < 300)) ? 1 : 0;
-    my $body_forbidden = $switch || $method eq 'HEAD'
+    my $body_forbidden = $method eq 'HEAD'
         || ($status >= 100 && $status < 200)
         || $status == 204 || $status == 205 || $status == 304;
+
+    croak '1xx and 204 responses must not contain Content-Length'
+        if (($status >= 100 && $status < 200) || $status == 204) && defined $cl;
+    croak '205 response Content-Length must be zero'
+        if $status == 205 && defined($cl) && $cl != 0;
+    croak 'bodyless response must not contain Transfer-Encoding'
+        if $body_forbidden && @$te;
 
     my $mode = 'none';
     my $remaining;
@@ -273,12 +427,12 @@ sub response_receive_plan {
     my $keep_alive = $tokens->{close} ? 0
         : $head->{version} eq '1.1' ? 1
         : $tokens->{'keep-alive'} ? 1 : 0;
-    $keep_alive = 0 if $mode eq 'close' || $switch;
+    $keep_alive = 0 if $mode eq 'close';
 
     return {
         mode       => $mode,
         remaining  => $remaining,
-        switch     => $switch,
+        switch     => 0,
         keep_alive => $keep_alive,
     };
 }
@@ -307,13 +461,31 @@ sub response_plan {
         if $stream_body && defined $body;
 
     my $method = $request->method;
-    my $switch = ($status == 101 || ($method eq 'CONNECT' && $status >= 200 && $status < 300)) ? 1 : 0;
+    my $connect_switch = uc($method) eq 'CONNECT'
+        && $status >= 200 && $status < 300 ? 1 : 0;
+    my $upgrade_switch = $status == 101 ? 1 : 0;
+    my $switch = $connect_switch || $upgrade_switch ? 1 : 0;
     my $body_forbidden = $switch || ($status >= 100 && $status < 200)
         || $status == 204 || $status == 205 || $status == 304;
     my $head_only = $method eq 'HEAD' ? 1 : 0;
 
+    if ($connect_switch) {
+        _validate_connect_request(
+            $request,
+            _fields($request, 'header'),
+            $request_version,
+            undef,
+            0,
+            [],
+        );
+        croak 'successful CONNECT response must not contain a buffered body'
+            if defined $body;
+        croak 'successful CONNECT response cannot stream a body' if $stream_body;
+        croak 'successful CONNECT response must not contain trailers' if @$trailers;
+    }
+
     croak 'protocol-switch responses cannot carry a body or trailers'
-        if $switch && ((defined($body) && length($body)) || $stream_body || @$trailers);
+        if $upgrade_switch && (defined($body) || $stream_body || @$trailers);
     croak 'this response status cannot carry a body or trailers'
         if $body_forbidden && !$switch
             && ((defined($body) && length($body)) || $stream_body || @$trailers);
@@ -321,7 +493,31 @@ sub response_plan {
     my $cl = _content_length($fields);
     my $te = _transfer_encoding($fields);
     croak 'response cannot contain both Transfer-Encoding and Content-Length'
-        if @$te && defined $cl;
+        if !$connect_switch && @$te && defined $cl;
+
+    if ($connect_switch) {
+        croak 'successful CONNECT response must not contain Content-Length'
+            if defined $cl;
+        croak 'successful CONNECT response must not contain Transfer-Encoding'
+            if @$te;
+        my $connection = _connection_tokens($fields);
+        croak 'successful CONNECT response cannot request Connection: close'
+            if $connection->{close};
+    }
+
+    if ($upgrade_switch) {
+        my $response_connection = _connection_tokens($fields);
+        if (!$response_connection->{upgrade}
+            && !@{ _values($fields, 'Connection') }) {
+            $fields = [ @$fields, [ 'Connection', 'Upgrade' ] ];
+        }
+        _validate_upgrade_response(
+            $request,
+            _fields($request, 'header'),
+            $fields,
+            $request_version,
+        );
+    }
 
     my ($mode, $remaining, $close_after) = ('none', undef, 0);
     if ($body_forbidden) {
