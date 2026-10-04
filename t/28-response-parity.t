@@ -105,6 +105,48 @@ subtest '205 accepts only zero Content-Length' => sub {
         '205 nonzero length error is explicit');
 };
 
+subtest '205 can use zero-length chunked framing but cannot carry content' => sub {
+    my $zero = client_case(
+        wire =>
+            "HTTP/1.1 205 Reset Content\r\n" .
+            "Transfer-Encoding: chunked\r\n\r\n" .
+            "0\r\n\r\n",
+    );
+    is($zero->{response_hits}, 1, 'chunk-framed 205 response is delivered');
+    is($zero->{body_hits}, 0, 'zero-chunk 205 has no content callback');
+    is($zero->{complete_hits}, 1, 'zero-chunk 205 completes normally');
+    ok(!$zero->{error}, 'zero-chunk 205 is valid framing');
+
+    my $body = client_case(
+        wire =>
+            "HTTP/1.1 205 Reset Content\r\n" .
+            "Transfer-Encoding: chunked\r\n\r\n" .
+            "1\r\nx\r\n0\r\n\r\n",
+    );
+    like($body->{error}, qr/205 response must not contain content/,
+        'decoded 205 content is rejected');
+    is($body->{tx}->state, 'error', 'content-bearing 205 is terminal');
+};
+
+subtest 'invalid informational framing is rejected before callback' => sub {
+    my $informational = 0;
+    my $error;
+    my $client = Unblock::HTTP1::Client->new;
+    my $tx = $client->request(
+        request_for('POST'),
+        on_informational => sub { $informational++ },
+        on_error => sub { $error = $_[1] },
+    );
+    $client->output;
+    $client->input(
+        "HTTP/1.1 100 Continue\r\nContent-Length: 0\r\n\r\n"
+    );
+    is($informational, 0, 'invalid informational response is not dispatched');
+    like($error, qr/1xx.*Content-Length|Content-Length.*1xx/,
+        'informational framing violation is explicit');
+    is($tx->state, 'error', 'invalid informational response makes Transaction error');
+};
+
 subtest 'server HEAD body is metadata only' => sub {
     my $server = Unblock::HTTP1::Server->new(
         on_request => sub {
