@@ -1,12 +1,15 @@
 use strict;
 use warnings;
 use ExtUtils::MakeMaker;
+use Uniform::HTTP::FastPath 0.06 ();
+
+my $uniform_native_inc = Uniform::HTTP::FastPath::native_include_dir();
 
 my %prereq = (
     'Carp'          => 0,
     'Config'        => 0,
     'Scalar::Util'  => 0,
-    'Uniform::HTTP' => '0.05',
+    'Uniform::HTTP' => '0.06',
     'XSLoader'      => 0,
     'parent'        => 0,
     'utf8'          => 0,
@@ -21,7 +24,9 @@ my %makefile = (
     MIN_PERL_VERSION => '5.016',
     CONFIGURE_REQUIRES => {
         'ExtUtils::MakeMaker' => 0,
+        'Uniform::HTTP'       => '0.06',
     },
+    INC => qq{-I"$uniform_native_inc"},
     PREREQ_PM => \%prereq,
     XS => { 'HTTP1.xs' => 'HTTP1.c' },
     clean => { FILES => 'HTTP1.c' },
