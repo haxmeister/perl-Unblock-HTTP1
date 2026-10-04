@@ -660,6 +660,7 @@ typedef struct {
     CV *input_cv;
     CV *head_cv;
     CV *eof_cv;
+    CV *uniform_request_cv;
     int role;
     int direct_head;
     size_t max_headers;
@@ -738,6 +739,152 @@ ub_http1_engine_method_cv(
     return *slot;
 }
 
+#define UB_UHTTP_ABI_VERSION 1
+#define UB_UHTTP_KIND_REQUEST 1
+#define UB_UHTTP_FLAG_COMPLETE          0x002
+#define UB_UHTTP_FLAG_MUTABLE           0x004
+#define UB_UHTTP_FLAG_BODY_MUTABLE      0x010
+#define UB_UHTTP_FLAG_TRAILERS_MUTABLE  0x020
+#define UB_UHTTP_FLAG_HEADERS_LOSSLESS  0x040
+#define UB_UHTTP_FLAG_TRAILERS_LOSSLESS 0x080
+#define UB_UHTTP_FLAG_TARGET_EXACT      0x100
+
+static CV *
+ub_http1_uniform_request_cv(
+    pTHX_
+    ub_http1_input_context *context
+)
+{
+    CV *cv;
+
+    if (context->uniform_request_cv != NULL)
+        return context->uniform_request_cv;
+
+    cv = get_cv("Uniform::HTTP::FastPath::request_from_validated", 0);
+    if (cv == NULL)
+        croak("Uniform::HTTP fast-path request constructor is unavailable");
+
+    context->uniform_request_cv = (CV *)SvREFCNT_inc((SV *)cv);
+    return context->uniform_request_cv;
+}
+
+static SV *
+ub_http1_uniform_request_from_head(
+    pTHX_
+    ub_http1_input_context *context,
+    SV *head
+)
+{
+    HV *hv;
+    SV **method_sv;
+    SV **target_sv;
+    SV **version_sv;
+    SV **headers_sv;
+    SV **body_mode_sv;
+    const char *method;
+    const char *target;
+    const char *body_mode;
+    STRLEN method_len;
+    STRLEN target_len;
+    STRLEN body_mode_len;
+    UV flags;
+    AV *view;
+    SV *view_ref;
+    CV *cv;
+    SV *request = NULL;
+    SV *error = NULL;
+    int count;
+    dSP;
+
+    if (!SvROK(head) || SvTYPE(SvRV(head)) != SVt_PVHV)
+        return NULL;
+
+    hv = (HV *)SvRV(head);
+    method_sv = hv_fetch(hv, "method", 6, 0);
+    target_sv = hv_fetch(hv, "target", 6, 0);
+    version_sv = hv_fetch(hv, "version", 7, 0);
+    headers_sv = hv_fetch(hv, "headers", 7, 0);
+    body_mode_sv = hv_fetch(hv, "body_mode", 9, 0);
+
+    if (method_sv == NULL || target_sv == NULL || version_sv == NULL
+        || headers_sv == NULL || body_mode_sv == NULL)
+        return NULL;
+    if (!SvOK(*method_sv) || !SvOK(*target_sv) || !SvOK(*version_sv)
+        || !SvOK(*headers_sv) || !SvOK(*body_mode_sv))
+        return NULL;
+
+    method = SvPVbyte(*method_sv, method_len);
+    target = SvPVbyte(*target_sv, target_len);
+
+    if (ascii_equal_cs(method, (size_t)method_len, "CONNECT", 7))
+        return NULL;
+    if (!(target_len > 0
+        && (target[0] == '/'
+            || (target_len == 1 && target[0] == '*'))))
+        return NULL;
+
+    body_mode = SvPVbyte(*body_mode_sv, body_mode_len);
+    flags = UB_UHTTP_FLAG_HEADERS_LOSSLESS
+        | UB_UHTTP_FLAG_TRAILERS_LOSSLESS
+        | UB_UHTTP_FLAG_TARGET_EXACT;
+
+    if (body_mode_len == 4 && memEQ(body_mode, "none", 4)) {
+        flags |= UB_UHTTP_FLAG_COMPLETE;
+    } else {
+        flags |= UB_UHTTP_FLAG_MUTABLE
+            | UB_UHTTP_FLAG_BODY_MUTABLE
+            | UB_UHTTP_FLAG_TRAILERS_MUTABLE;
+    }
+
+    view = newAV();
+    av_extend(view, 13);
+    av_push(view, newSViv(UB_UHTTP_ABI_VERSION));
+    av_push(view, newSViv(UB_UHTTP_KIND_REQUEST));
+    av_push(view, newSVuv(flags));
+    av_push(view, newSVsv(*version_sv));
+    av_push(view, newSVsv(*method_sv));
+    av_push(view, newSVsv(*target_sv));
+    av_push(view, newSV(0));
+    av_push(view, newSV(0));
+    av_push(view, newSV(0));
+    av_push(view, newSV(0));
+    av_push(view, newSV(0));
+    av_push(view, newSVsv(*headers_sv));
+    av_push(view, newRV_noinc((SV *)newAV()));
+    av_push(view, newSV(0));
+    view_ref = newRV_noinc((SV *)view);
+
+    cv = ub_http1_uniform_request_cv(aTHX_ context);
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(sv_2mortal(view_ref));
+    PUTBACK;
+    count = call_sv((SV *)cv, G_SCALAR | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    } else if (count == 1) {
+        request = newSVsv(POPs);
+    } else {
+        error = newSVpvs(
+            "Uniform::HTTP fast-path request constructor returned no request"
+        );
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return request;
+}
+
 static int
 ub_http1_call_engine_scalar(
     pTHX_
@@ -786,6 +933,7 @@ ub_http1_call_engine_input(
     SV *window,
     size_t length,
     SV *head,
+    SV *request,
     size_t *consumed,
     int *head_ready
 )
@@ -810,6 +958,7 @@ ub_http1_call_engine_input(
     XPUSHs(window);
     mPUSHu((UV)length);
     XPUSHs(head != NULL ? head : &PL_sv_undef);
+    XPUSHs(request != NULL ? request : &PL_sv_undef);
     PUTBACK;
     count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
     SPAGAIN;
@@ -845,6 +994,7 @@ ub_http1_call_engine_head(
     pTHX_
     ub_http1_input_context *context,
     SV *head,
+    SV *request,
     int *head_ready
 )
 {
@@ -864,6 +1014,7 @@ ub_http1_call_engine_head(
     PUSHMARK(SP);
     XPUSHs(context->engine);
     XPUSHs(head);
+    XPUSHs(request != NULL ? request : &PL_sv_undef);
     PUTBACK;
     count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
     SPAGAIN;
@@ -952,6 +1103,7 @@ ub_http1_input_borrowed(
     ub_http1_borrowed_window *window = NULL;
     SV *object = NULL;
     SV *head = NULL;
+    SV *request = NULL;
     SV *window_arg = &PL_sv_undef;
     int head_ready = 0;
     int head_only = 0;
@@ -986,6 +1138,9 @@ ub_http1_input_borrowed(
             SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
 
             if (ok_sv != NULL && SvTRUE(*ok_sv)) {
+                request = ub_http1_uniform_request_from_head(
+                    aTHX_ context, head
+                );
                 SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
                 if (consumed_sv != NULL && SvOK(*consumed_sv)) {
                     UV head_consumed = SvUV(*consumed_sv);
@@ -1009,15 +1164,19 @@ ub_http1_input_borrowed(
         JMPENV_PUSH(jump_status);
         if (jump_status == 0) {
             result = ub_http1_call_engine_head(
-                aTHX_ context, head, &head_ready
+                aTHX_ context, head, request, &head_ready
             );
             JMPENV_POP;
         } else {
             JMPENV_POP;
+            if (request != NULL)
+                SvREFCNT_dec(request);
             SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
         }
 
+        if (request != NULL)
+            SvREFCNT_dec(request);
         SvREFCNT_dec(head);
 
         if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
@@ -1062,6 +1221,7 @@ ub_http1_input_borrowed(
                 window_arg,
                 length,
                 head,
+                request,
                 consumed,
                 &head_ready
             );
@@ -1072,6 +1232,8 @@ ub_http1_input_borrowed(
                 window->valid = 0;
             if (object != NULL)
                 SvREFCNT_dec(object);
+            if (request != NULL)
+                SvREFCNT_dec(request);
             if (head != NULL)
                 SvREFCNT_dec(head);
             JMPENV_JUMP(jump_status);
@@ -1082,6 +1244,8 @@ ub_http1_input_borrowed(
         window->valid = 0;
     if (object != NULL)
         SvREFCNT_dec(object);
+    if (request != NULL)
+        SvREFCNT_dec(request);
     if (head != NULL)
         SvREFCNT_dec(head);
 
@@ -1135,6 +1299,8 @@ ub_http1_input_destroy(pTHX_ void *opaque)
         SvREFCNT_dec((SV *)context->head_cv);
     if (context->eof_cv != NULL)
         SvREFCNT_dec((SV *)context->eof_cv);
+    if (context->uniform_request_cv != NULL)
+        SvREFCNT_dec((SV *)context->uniform_request_cv);
     if (context->engine != NULL)
         SvREFCNT_dec(context->engine);
     Safefree(context);
