@@ -11,7 +11,7 @@ use Unblock::HTTP1::_Native ();
 use Unblock::HTTP1::_Wire ();
 use Unblock::HTTP1::Transaction;
 
-our $VERSION = '0.001';
+our $VERSION = '0.01';
 
 sub new {
     my ($class, %option) = @_;
