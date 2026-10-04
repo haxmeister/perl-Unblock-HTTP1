@@ -6,12 +6,10 @@ MANIFEST.SKIP
 Makefile.PL
 README.md
 bench/README.md
-bench/compare-linux-event.pl
 bench/http1.pl
 bench/serialize.pl
 docs/ARCHITECTURE.md
 docs/INTEGRATION.md
-docs/LINUX_EVENT_BRIDGE.md
 docs/PARITY.md
 docs/TRUSTED_UNIFORM.md
 lib/Unblock/HTTP1.pm
