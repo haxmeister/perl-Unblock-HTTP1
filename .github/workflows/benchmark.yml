@@ -37,3 +37,7 @@ jobs:
       - name: Run standalone benchmark
         shell: bash
         run: perl -Mblib bench/http1.pl 1
+
+      - name: Run serialization diagnostic
+        shell: bash
+        run: perl -Mblib bench/serialize.pl 1
