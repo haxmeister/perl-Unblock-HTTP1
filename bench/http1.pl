@@ -142,6 +142,21 @@ cmpthese(
             my $plan = Unblock::HTTP1::_Wire::response_plan($request, $response);
             die "serialize failure" unless length $plan->{wire};
         },
+        serialize_request_4k => sub {
+            my $plan = Unblock::HTTP1::_Wire::request_plan($fixed_request);
+            die "fixed request serialize failure"
+                unless length($plan->{wire}) > $body_size
+                    && $plan->{mode} eq 'content-length';
+        },
+        serialize_response_4k => sub {
+            my $plan = Unblock::HTTP1::_Wire::response_plan(
+                $fixed_request,
+                $fixed_response,
+            );
+            die "fixed response serialize failure"
+                unless length($plan->{wire}) > $body_size
+                    && $plan->{mode} eq 'content-length';
+        },
         server_get_cycle => sub {
             $server_cycle->input($request_wire);
             my $wire = $server_cycle->output;
