@@ -233,7 +233,29 @@ valid_request_target(const char *method, size_t method_len,
 
     for (i = 1; i < target_len; ++i) {
         unsigned char ch = (unsigned char)target[i];
-        if (ch == ':') return 1;
+        if (ch == ':') {
+            if (ascii_equal_ci(target, i, "http", 4) ||
+                ascii_equal_ci(target, i, "https", 5)) {
+                size_t pos = i + 1;
+                size_t authority_start;
+
+                if (pos + 1 >= target_len ||
+                    target[pos] != '/' || target[pos + 1] != '/')
+                    return 0;
+
+                pos += 2;
+                authority_start = pos;
+                while (pos < target_len &&
+                       target[pos] != '/' && target[pos] != '?') {
+                    if (target[pos] == '@')
+                        return 0;
+                    ++pos;
+                }
+                if (pos == authority_start)
+                    return 0;
+            }
+            return 1;
+        }
         if (!((ch >= 'A' && ch <= 'Z') ||
               (ch >= 'a' && ch <= 'z') ||
               (ch >= '0' && ch <= '9') ||
