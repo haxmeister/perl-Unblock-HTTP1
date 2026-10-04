@@ -171,4 +171,32 @@ is $consumed, length($switch_response),
 ok $tx->is_complete, 'borrowed switch completes client transaction';
 is_deeply \@switch, [qw(server client)], 'switch callbacks still fire';
 
+my $driver_hits = 0;
+my $driver_server = Unblock::HTTP1::Server->new(
+    on_request => sub {
+        my ($tx) = @_;
+        ++$driver_hits;
+        $tx->respond(Uniform::HTTP::Response->new(status => 204));
+    },
+);
+my $driver =
+    Unblock::HTTP1::_Native::BorrowedDriver->new($driver_server);
+
+for (1 .. 2) {
+    my ($driver_status, $driver_consumed) = $driver->feed(
+        "GET /driver HTTP/1.1\r\nHost: example.test\r\n\r\n"
+    );
+    is $driver_status, Unblock::HTTP1::NativeABI::INPUT_OK(),
+        'persistent native driver consumes request';
+    is $driver_consumed,
+        length("GET /driver HTTP/1.1\r\nHost: example.test\r\n\r\n"),
+        'persistent native driver reports exact consumed prefix';
+    $driver_server->output;
+}
+is $driver_hits, 2, 'one native ABI context serves repeated requests';
+
+like Unblock::HTTP1::NativeABI::c_header(),
+    qr/ub_http1_input_ops_v1/,
+    'native ABI publishes its C layout';
+
 done_testing;
