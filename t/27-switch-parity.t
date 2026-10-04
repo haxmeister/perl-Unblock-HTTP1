@@ -51,7 +51,7 @@ subtest 'client successful CONNECT switches at the head boundary' => sub {
 
     like(
         $client->output,
-        qr/\ACONNECT example\.test:443 HTTP\/1\.1\r\n.*\r\nHost: example\.test:443\r\n/s,
+        qr/\ACONNECT example\.test:443 HTTP\/1\.1\r\nHost: example\.test:443\r\n/s,
         'CONNECT request uses authority-form target and matching Host',
     );
 
