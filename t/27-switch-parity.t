@@ -103,16 +103,16 @@ subtest 'client rejects malformed CONNECT requests before wire output' => sub {
             qr/must not contain a buffered body/,
         ],
         [
-            'Content-Length',
+            'nonzero Content-Length',
             Uniform::HTTP::Request->new(
                 method => 'CONNECT',
                 target => 'example.test:443',
                 headers => [
                     [ Host => 'example.test:443' ],
-                    [ 'Content-Length' => '0' ],
+                    [ 'Content-Length' => '1' ],
                 ],
             ),
-            qr/must not contain Content-Length/,
+            qr/Content-Length must be zero/,
         ],
     );
 
@@ -128,6 +128,26 @@ subtest 'client rejects malformed CONNECT requests before wire output' => sub {
         like($error, $pattern, "$name CONNECT error is explicit");
         is($client->output, '', "$name CONNECT produces no wire bytes");
     }
+};
+
+subtest 'client permits zero Content-Length on CONNECT' => sub {
+    my $client = Unblock::HTTP1::Client->new;
+    my $request = Uniform::HTTP::Request->new(
+        method  => 'CONNECT',
+        target  => 'example.test:443',
+        headers => [
+            [ Host => 'example.test:443' ],
+            [ 'Content-Length' => '0' ],
+        ],
+    );
+
+    my $tx = $client->request($request);
+    like(
+        $client->output,
+        qr/\ACONNECT example\.test:443 HTTP\/1\.1\r\n.*Content-Length: 0\r\n/s,
+        'zero Content-Length CONNECT serializes without a body',
+    );
+    ok(!$tx->is_terminal, 'CONNECT transaction remains active awaiting response');
 };
 
 subtest 'server successful CONNECT preserves post-head tunnel bytes' => sub {
