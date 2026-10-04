@@ -45,6 +45,7 @@ t/38-method-case.t
 t/39-request-target.t
 t/40-client-extra-response.t
 t/41-response-transfer-coding.t
+t/42-content-length.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
