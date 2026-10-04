@@ -24,3 +24,10 @@ Revision history for Unblock-HTTP1
     - Bodyless and fully buffered fixed-length receive fast paths avoid
       unnecessary receive-state allocation while preserving callback lifecycle.
     - Focused fast-path regressions compare coalesced and fragmented body input.
+    - Cross-engine receive benchmarks isolate Uniform message construction as
+      the clearest remaining receive-side performance cost.
+    - Callback and message-finalization diagnostics show those lifecycle calls
+      are not useful optimization targets.
+    - Added an explicit distribution MANIFEST and CI disttest coverage.
+    - Documented the portable Linux::Event adapter and optional native bridge
+      boundary without introducing Linux-specific engine code.
