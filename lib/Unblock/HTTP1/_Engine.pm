@@ -67,17 +67,19 @@ sub input {
 }
 
 sub _input_borrowed {
-    my ($self, $window) = @_;
+    my ($self, $window, $length) = @_;
     croak '_input_borrowed(): cannot be called recursively from an engine callback'
         if $self->{driving};
-    return 4 if $self->{switched};
-    return 3 if $self->{closed};
+    return (4, 0) if $self->{switched};
+    return (3, 0) if $self->{closed};
     croak '_input_borrowed(): cannot mix borrowed input with buffered portable input'
         if length $self->{input};
 
-    my $status;
+    my ($status, $consumed);
     {
         local $self->{borrowed_input} = $window;
+        local $self->{borrowed_length} = $length;
+        local $self->{borrowed_offset} = 0;
         local $self->{driving} = 1;
         $self->_drive;
 
@@ -87,16 +89,17 @@ sub _input_borrowed {
         } elsif ($self->{switched}) {
             $status = 4;
         } elsif ($remaining && $self->_borrowed_should_buffer_tail) {
-            $self->{input} .= $window->take($remaining);
+            $self->{input} .= $self->_input_take($remaining);
             $status = 0;
         } elsif ($remaining) {
             $status = 1;
         } else {
             $status = 0;
         }
+        $consumed = $self->{borrowed_offset};
     }
 
-    return $status;
+    return ($status, $consumed);
 }
 
 sub _borrowed_input_eof {
@@ -109,14 +112,15 @@ sub _borrowed_input_eof {
 
 sub _input_length {
     my ($self) = @_;
-    return $self->{borrowed_input}->remaining
-        if exists $self->{borrowed_input};
+    if (exists $self->{borrowed_input}) {
+        return $self->{borrowed_length} - $self->{borrowed_offset};
+    }
     return length $self->{input};
 }
 
 sub _input_window {
     my ($self) = @_;
-    return ($self->{borrowed_input}, 0)
+    return ($self->{borrowed_input}, $self->{borrowed_offset})
         if exists $self->{borrowed_input};
     return ($self->{input}, 0);
 }
@@ -124,8 +128,12 @@ sub _input_window {
 sub _input_take {
     my ($self, $length) = @_;
     return '' unless $length;
-    return $self->{borrowed_input}->take($length)
-        if exists $self->{borrowed_input};
+    if (exists $self->{borrowed_input}) {
+        my $offset = $self->{borrowed_offset};
+        my $bytes = $self->{borrowed_input}->slice($offset, $length);
+        $self->{borrowed_offset} += $length;
+        return $bytes;
+    }
     return substr($self->{input}, 0, $length, '');
 }
 
@@ -133,7 +141,7 @@ sub _input_discard {
     my ($self, $length) = @_;
     return unless $length;
     if (exists $self->{borrowed_input}) {
-        $self->{borrowed_input}->discard($length);
+        $self->{borrowed_offset} += $length;
         return;
     }
     substr($self->{input}, 0, $length, '');
@@ -143,7 +151,7 @@ sub _input_discard {
 sub _input_clear {
     my ($self) = @_;
     if (exists $self->{borrowed_input}) {
-        $self->{borrowed_input}->clear;
+        $self->{borrowed_offset} = $self->{borrowed_length};
     } else {
         $self->{input} = '';
     }
@@ -152,8 +160,11 @@ sub _input_clear {
 
 sub _input_remaining {
     my ($self) = @_;
-    return $self->{borrowed_input}->remaining_bytes
-        if exists $self->{borrowed_input};
+    if (exists $self->{borrowed_input}) {
+        return $self->{borrowed_input}->slice(
+            $self->{borrowed_offset}, $self->_input_length,
+        );
+    }
     return $self->{input};
 }
 
