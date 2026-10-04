@@ -9,9 +9,11 @@ sub _init_engine {
     my ($self, %option) = @_;
     $self->{max_head_size} = exists $option{max_head_size} ? $option{max_head_size} : 65_536;
     $self->{max_headers} = exists $option{max_headers} ? $option{max_headers} : 100;
+    $self->{max_chunk_extension_size} = exists $option{max_chunk_extension_size}
+        ? $option{max_chunk_extension_size} : 16_384;
     $self->{high_water} = exists $option{high_water} ? $option{high_water} : 65_536;
     $self->{low_water} = exists $option{low_water} ? $option{low_water} : 32_768;
-    for my $key (qw(max_head_size max_headers high_water low_water)) {
+    for my $key (qw(max_head_size max_headers max_chunk_extension_size high_water low_water)) {
         croak "new(): $key must be a non-negative integer"
             unless defined($self->{$key}) && !ref($self->{$key}) && $self->{$key} =~ /\A[0-9]+\z/;
     }
