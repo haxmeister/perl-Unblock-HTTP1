@@ -95,6 +95,24 @@ my $fragmented_ok = eval {
 ok(!$fragmented_ok,
     'chunk extension budget is retained across fragmented input');
 
+
+my $cumulative = Unblock::HTTP1::_Native::Chunked->new(4);
+my ($cumulative_done, $cumulative_body) = $cumulative->feed(
+    "1;a\r\nx\r\n1;b\r\ny\r\n0\r\n\r\n", 1
+);
+ok($cumulative_done, 'total extension bytes at configured limit are accepted');
+is($cumulative_body, 'xy', 'cumulative extension budget preserves body bytes');
+
+my $cumulative_over = Unblock::HTTP1::_Native::Chunked->new(4);
+my $cumulative_over_ok = eval {
+    $cumulative_over->feed(
+        "1;a\r\nx\r\n1;b\r\ny\r\n1;c\r\nz\r\n0\r\n\r\n", 1
+    );
+    1;
+};
+ok(!$cumulative_over_ok,
+    'chunk extension budget accumulates across the entire message');
+
 my $trailers = Unblock::HTTP1::_Native->parse_trailers($left);
 ok($trailers->{ok}, 'trailer block parses separately');
 is_deeply($trailers->{headers}, [ [ 'X-End', 'yes' ] ], 'trailer field retained');
