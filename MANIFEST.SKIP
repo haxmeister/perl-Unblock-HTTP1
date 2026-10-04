@@ -9,5 +9,6 @@
 ^MYMETA\.
 ^pm_to_blib$
 ^HTTP1\.c$
+^HTTP1\.bs$
 ^HTTP1\.o$
 ^Unblock-HTTP1-
