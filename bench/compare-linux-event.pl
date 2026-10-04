@@ -28,6 +28,26 @@ my $wire =
 my $head = Unblock::HTTP1::_Native->parse_request_head($wire, 0, 100);
 die "Unblock setup parse failed\n" unless $head && $head->{ok};
 
+sub trusted_uniform_request {
+    my ($parsed) = @_;
+    return bless {
+        version           => $parsed->{version},
+        headers           => $parsed->{headers},
+        trailers          => [],
+        initial_frozen    => 1,
+        trailers_frozen   => 1,
+        body              => undef,
+        has_buffered_body => 0,
+        complete          => 1,
+        mutable           => 0,
+        method            => $parsed->{method},
+        target            => $parsed->{target},
+        scheme            => undef,
+        authority         => undef,
+        protocol          => undef,
+    }, 'Uniform::HTTP::Request';
+}
+
 print "HTTP/1 receive-path comparison\n";
 print "Perl $] ($Config{archname})\n";
 print "Unblock::HTTP1 $Unblock::HTTP1::VERSION\n";
@@ -35,7 +55,10 @@ print "Linux::Event::HTTP::_HTTP1 $Linux::Event::HTTP::_HTTP1::VERSION\n";
 print "approximately $seconds CPU seconds per case\n\n";
 
 print "The public-object cases are the useful cross-engine comparison.\n";
-print "The native cases expose different internal contracts and are diagnostic only.\n\n";
+print "The native cases expose different internal contracts and are diagnostic only.\n";
+print "The trusted-shape case is diagnostic only and deliberately bypasses the\n";
+print "documented Uniform constructor to estimate the value of a sanctioned\n";
+print "trusted-parser construction API. It is not production code.\n\n";
 
 cmpthese(
     -$seconds,
@@ -88,6 +111,17 @@ cmpthese(
             $request->freeze;
             die "Unblock construction failure"
                 unless $request->method eq 'GET';
+        },
+        unblock_trusted_shape => sub {
+            my $parsed = Unblock::HTTP1::_Native->parse_request_head(
+                $wire, 0, 100,
+            );
+            die "Unblock parse failure" unless $parsed && $parsed->{ok};
+            my $request = trusted_uniform_request($parsed);
+            die "trusted-shape access failure"
+                unless $request->method eq 'GET'
+                    && $request->target eq '/api/resource?x=1'
+                    && ($request->header('Host') || '') eq 'example.test';
         },
         linux_native_request => sub {
             my $request = Linux::Event::HTTP::_HTTP1->parse_request(
