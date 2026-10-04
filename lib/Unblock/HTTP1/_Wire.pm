@@ -547,6 +547,20 @@ sub _replace_or_add {
     return \@out;
 }
 
+sub _append_transfer_coding {
+    my ($fields, $coding) = @_;
+    my @out = map { [ @$_ ] } @$fields;
+
+    for (my $i = $#out; $i >= 0; --$i) {
+        next unless _lc($out[$i][0]) eq 'transfer-encoding';
+        $out[$i][1] .= ', ' . $coding;
+        return \@out;
+    }
+
+    push @out, [ 'Transfer-Encoding', $coding ];
+    return \@out;
+}
+
 sub _serialize_fields {
     my ($fields) = @_;
     my $wire = '';
@@ -1005,10 +1019,7 @@ sub response_plan {
         if $status == 205 && defined($cl) && $cl != 0;
 
     my $metadata_only_framing = $head_only || $status == 304 ? 1 : 0;
-    my $raw_te = _values($fields, 'Transfer-Encoding');
-    my $te = $metadata_only_framing
-        ? (@$raw_te ? [ 'metadata-only' ] : [])
-        : _transfer_encoding($fields);
+    my $te = _response_transfer_encoding($fields);
     croak 'response cannot contain both Transfer-Encoding and Content-Length'
         if !$connect_switch && @$te && defined $cl;
 
@@ -1057,11 +1068,27 @@ sub response_plan {
     } elsif (@$trailers) {
         croak 'HTTP/1.0 cannot send trailer fields' if $request_version eq '1.0';
         croak 'trailers cannot be combined with Content-Length' if defined $cl;
-        $fields = _replace_or_add($fields, 'Transfer-Encoding', 'chunked');
+
+        if (@$te) {
+            my $has_chunked = grep { $_ eq 'chunked' } @$te;
+            croak 'cannot add final chunked framing after an earlier chunked transfer coding'
+                if $has_chunked && $te->[-1] ne 'chunked';
+            if ($te->[-1] ne 'chunked') {
+                $fields = _append_transfer_coding($fields, 'chunked');
+            }
+        } else {
+            $fields = [ @$fields, [ 'Transfer-Encoding', 'chunked' ] ];
+        }
         $mode = 'chunked';
     } elsif (@$te) {
-        croak 'HTTP/1.0 does not support chunked transfer coding' if $request_version eq '1.0';
-        $mode = 'chunked';
+        croak 'HTTP/1.0 does not support Transfer-Encoding'
+            if $request_version eq '1.0';
+        if ($te->[-1] eq 'chunked') {
+            $mode = 'chunked';
+        } else {
+            $mode = 'close';
+            $close_after = 1;
+        }
     } elsif (defined $cl) {
         $mode = 'content-length';
         $remaining = $cl;
