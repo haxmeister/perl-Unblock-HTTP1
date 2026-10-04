@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.001';
+our $VERSION = '0.01';
 
 sub _new {
     my ($class, $owner, $request, %args) = @_;
