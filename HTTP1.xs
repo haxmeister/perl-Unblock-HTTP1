@@ -762,7 +762,7 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     AV *list;
   CODE:
     (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
     if (offset > (UV)buffer_len)
         croak("offset exceeds buffer length");
     buf += (size_t)offset;
@@ -920,7 +920,7 @@ parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     AV *list;
   CODE:
     (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
     if (offset > (UV)buffer_len)
         croak("offset exceeds buffer length");
     buf += (size_t)offset;
@@ -973,7 +973,7 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     AV *list;
   CODE:
     (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
     if (offset > (UV)buffer_len)
         croak("offset exceeds buffer length");
     buf += (size_t)offset;
