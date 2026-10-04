@@ -456,8 +456,9 @@ sub _validate_connect_request {
     croak 'CONNECT cannot use a streaming request body' if $stream_body;
     croak 'CONNECT request must not contain a buffered body' if defined $body;
     croak 'CONNECT request must not contain trailers' if $trailers && @$trailers;
-    croak 'CONNECT request must not contain Content-Length'
-        if @{ _values($fields, 'Content-Length') };
+    my $connect_cl = _content_length($fields);
+    croak 'CONNECT request Content-Length must be zero when present'
+        if defined($connect_cl) && $connect_cl != 0;
     croak 'CONNECT request must not contain Transfer-Encoding'
         if @{ _values($fields, 'Transfer-Encoding') };
 
