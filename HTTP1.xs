@@ -2,6 +2,9 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #include "vendor/picohttpparser/picohttpparser.c"
 
@@ -428,27 +431,18 @@ strict_headers(const struct phr_header *headers, size_t count)
     return 1;
 }
 
-MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native
-PROTOTYPES: DISABLE
 
-const char *
-pico_version(CLASS)
-    const char *CLASS
-  CODE:
-    (void)CLASS;
-    RETVAL = PICOHTTPPARSER_VERSION;
-  OUTPUT:
-    RETVAL
-
-SV *
-parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
-    const char *CLASS
-    SV *buffer
-    UV last_len
-    UV max_headers
-  PREINIT:
-    STRLEN buffer_len;
-    const char *buf;
+static SV *
+ub_http1_parse_request_head_result(
+    pTHX_
+    const char *buf,
+    size_t buffer_len,
+    size_t last_len,
+    size_t max_headers,
+    const uhttp_native_api *uniform_api,
+    SV **request_out
+)
+{
     const char *method;
     size_t method_len;
     const char *target;
@@ -473,32 +467,50 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
     int is_connect = 0;
     const char *host_value = NULL;
     size_t host_value_len = 0;
+    uhttp_native_field native_headers[UB_HTTP1_MAX_HEADERS];
+    char version_bytes[3];
+    SV *native_request = NULL;
     HV *hv;
     AV *list;
-  CODE:
-    (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
-    if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+
+    if (request_out != NULL)
+        *request_out = NULL;
+
+    if (last_len > buffer_len)
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
-    count = (size_t)max_headers;
-    consumed = phr_parse_request(buf, (size_t)buffer_len,
+
+    count = max_headers;
+    consumed = phr_parse_request(
+        buf, buffer_len,
         &method, &method_len, &target, &target_len, &minor,
-        headers, &count, (size_t)last_len);
-    if (consumed == -2) XSRETURN_UNDEF;
+        headers, &count, last_len
+    );
+
+    if (consumed == -2)
+        return NULL;
+
     if (consumed == -1) {
-        if (count == (size_t)max_headers)
-            RETVAL = new_error_result(aTHX_ 431, "too many HTTP/1 request header fields");
-        else
-            RETVAL = new_error_result(aTHX_ 400, "malformed HTTP/1 request");
-    } else if (minor < 0 || minor > 9) {
-        RETVAL = new_error_result(aTHX_ 505, "unsupported HTTP/1 version");
-    } else if (!strict_headers(headers, count)) {
-        RETVAL = new_error_result(aTHX_ 400, "invalid or folded HTTP/1 header field");
-    } else {
+        if (count == max_headers)
+            return new_error_result(
+                aTHX_ 431, "too many HTTP/1 request header fields"
+            );
+        return new_error_result(aTHX_ 400, "malformed HTTP/1 request");
+    }
+
+    if (minor < 0 || minor > 9)
+        return new_error_result(aTHX_ 505, "unsupported HTTP/1 version");
+
+    if (!strict_headers(headers, count))
+        return new_error_result(
+            aTHX_ 400, "invalid or folded HTTP/1 header field"
+        );
+
+    {
         const char *error = NULL;
         int error_status = 0;
+
         is_connect = ascii_equal_cs(method, method_len, "CONNECT", 7);
         if (!valid_request_target(method, method_len, target, target_len)) {
             error = "invalid HTTP/1 request target";
@@ -508,11 +520,13 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             error = "CONNECT requires HTTP/1.1 semantics";
             error_status = 400;
         }
+
         for (i = 0; i < count && !error; ++i) {
             const char *name = headers[i].name;
             size_t name_len = headers[i].name_len;
             const char *value = headers[i].value;
             size_t value_len = headers[i].value_len;
+
             if (ascii_equal_ci(name, name_len, "Host", 4)) {
                 ++host_count;
                 if (host_count == 1) {
@@ -520,27 +534,37 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
                     host_value_len = value_len;
                 }
                 if (!valid_host_value(value, value_len)) {
-                    error = "invalid Host field"; error_status = 400;
+                    error = "invalid Host field";
+                    error_status = 400;
                 }
-            } else if (ascii_equal_ci(name, name_len, "Content-Length", 14)) {
-                if (!parse_content_length(value, value_len, &content_length, &has_cl)) {
-                    error = "invalid or conflicting Content-Length"; error_status = 400;
+            } else if (ascii_equal_ci(
+                    name, name_len, "Content-Length", 14)) {
+                if (!parse_content_length(
+                        value, value_len,
+                        &content_length, &has_cl)) {
+                    error = "invalid or conflicting Content-Length";
+                    error_status = 400;
                 }
-            } else if (ascii_equal_ci(name, name_len, "Transfer-Encoding", 17)) {
+            } else if (ascii_equal_ci(
+                    name, name_len, "Transfer-Encoding", 17)) {
                 te_present = 1;
-                if (!parse_transfer_encoding(value, value_len, &te_count,
-                        &chunked_count, &final_chunked, &unsupported)) {
-                    error = "invalid Transfer-Encoding"; error_status = 400;
+                if (!parse_transfer_encoding(
+                        value, value_len,
+                        &te_count, &chunked_count,
+                        &final_chunked, &unsupported)) {
+                    error = "invalid Transfer-Encoding";
+                    error_status = 400;
                 }
-            } else if (ascii_equal_ci(name, name_len, "Connection", 10)) {
-                if (!parse_connection(value, value_len, &close_seen, &keep_seen)) {
-                    error = "invalid Connection field"; error_status = 400;
+            } else if (ascii_equal_ci(
+                    name, name_len, "Connection", 10)) {
+                if (!parse_connection(
+                        value, value_len, &close_seen, &keep_seen)) {
+                    error = "invalid Connection field";
+                    error_status = 400;
                 }
             } else if (ascii_equal_ci(name, name_len, "Expect", 6)) {
                 int e = parse_expect(value, value_len);
                 if (minor == 0) {
-                    /* HTTP/1.0 did not define expectations. In particular,
-                     * a received 100-continue expectation must be ignored. */
                     expect_mode = 0;
                 } else if (e < 0) {
                     expect_mode = -1;
@@ -549,32 +573,43 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
                 }
             }
         }
+
         if (!error && host_count > 1) {
-            error = "multiple Host fields"; error_status = 400;
+            error = "multiple Host fields";
+            error_status = 400;
         }
         if (!error && minor >= 1 && host_count != 1) {
-            error = "HTTP/1.1 semantics require exactly one Host field"; error_status = 400;
+            error = "HTTP/1.1 semantics require exactly one Host field";
+            error_status = 400;
         }
         if (!error && te_present && has_cl) {
-            error = "Transfer-Encoding and Content-Length cannot be combined"; error_status = 400;
+            error = "Transfer-Encoding and Content-Length cannot be combined";
+            error_status = 400;
         }
         if (!error && minor == 0 && te_present) {
-            error = "HTTP/1.0 request must not contain Transfer-Encoding"; error_status = 400;
+            error = "HTTP/1.0 request must not contain Transfer-Encoding";
+            error_status = 400;
         }
-        if (!error && is_connect && (te_present || (has_cl && content_length != 0))) {
-            error = "CONNECT request must not contain content framing"; error_status = 400;
+        if (!error && is_connect
+            && (te_present || (has_cl && content_length != 0))) {
+            error = "CONNECT request must not contain content framing";
+            error_status = 400;
         }
-        if (!error && is_connect && host_count == 1 &&
-            !connect_host_matches_target(
-                host_value, host_value_len, target, target_len
-            )) {
-            error = "CONNECT Host must identify request target"; error_status = 400;
+        if (!error && is_connect && host_count == 1
+            && !connect_host_matches_target(
+                host_value, host_value_len, target, target_len)) {
+            error = "CONNECT Host must identify request target";
+            error_status = 400;
         }
+
         if (!error && te_present) {
             if (chunked_count != 1 || !final_chunked) {
-                error = "chunked must be the final and only chunked transfer coding"; error_status = 400;
+                error =
+                    "chunked must be the final and only chunked transfer coding";
+                error_status = 400;
             } else if (unsupported) {
-                error = "unsupported transfer coding"; error_status = 501;
+                error = "unsupported transfer coding";
+                error_status = 501;
             } else {
                 body_mode = UB_BODY_CHUNKED;
             }
@@ -582,92 +617,926 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
             body_mode = (is_connect && content_length == 0)
                 ? UB_BODY_NONE : UB_BODY_CONTENT_LENGTH;
         }
-        if (error) {
-            RETVAL = new_error_result(aTHX_ error_status, error);
-        } else {
-            hv = newHV();
-            hv_store(hv, "ok", 2, newSViv(1), 0);
-            hv_store(hv, "consumed", 8, newSViv(consumed), 0);
-            hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
-            hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
-            hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
-            list = headers_to_av(aTHX_ headers, count);
-            hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
-            if (body_mode == UB_BODY_CHUNKED)
-                hv_store(hv, "body_mode", 9, newSVpvs("chunked"), 0);
-            else if (body_mode == UB_BODY_CONTENT_LENGTH)
-                hv_store(hv, "body_mode", 9, newSVpvs("content-length"), 0);
-            else
-                hv_store(hv, "body_mode", 9, newSVpvs("none"), 0);
-            if (has_cl)
-                hv_store(hv, "content_length", 14, newSVuv(content_length), 0);
-            hv_store(hv, "keep_alive", 10,
-                newSViv(close_seen ? 0 : (minor >= 1 ? 1 : (keep_seen ? 1 : 0))), 0);
-            hv_store(hv, "expect_continue", 15, newSViv(expect_mode), 0);
-            RETVAL = newRV_noinc((SV *)hv);
-        }
-    }
-  OUTPUT:
-    RETVAL
 
-SV *
-parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100)
-    const char *CLASS
-    SV *buffer
-    UV last_len
-    UV max_headers
-  PREINIT:
-    STRLEN buffer_len;
-    const char *buf;
+        if (error)
+            return new_error_result(aTHX_ error_status, error);
+    }
+
+    if (uniform_api != NULL && request_out != NULL
+        && !is_connect && target_len > 0
+        && (target[0] == '/'
+            || (target_len == 1 && target[0] == '*'))) {
+        uhttp_native_input input;
+
+        uhttp_native_input_init(&input, UHTTP_KIND_REQUEST);
+        input.flags =
+            UHTTP_HEADERS_LOSSLESS
+            | UHTTP_TRAILERS_LOSSLESS
+            | UHTTP_TARGET_EXACT;
+
+        if (body_mode == UB_BODY_NONE) {
+            input.flags |= UHTTP_COMPLETE;
+        } else {
+            input.flags |=
+                UHTTP_MUTABLE
+                | UHTTP_BODY_MUTABLE
+                | UHTTP_TRAILERS_MUTABLE;
+        }
+
+        version_bytes[0] = '1';
+        version_bytes[1] = '.';
+        version_bytes[2] = (char)('0' + minor);
+        input.version.data = version_bytes;
+        input.version.len = 3;
+        input.method.data = method;
+        input.method.len = (STRLEN)method_len;
+        input.target.data = target;
+        input.target.len = (STRLEN)target_len;
+
+        for (i = 0; i < count; ++i) {
+            const char *value = headers[i].value;
+            size_t value_len = headers[i].value_len;
+
+            while (value_len && is_ows((unsigned char)*value)) {
+                ++value;
+                --value_len;
+            }
+            while (value_len
+                && is_ows((unsigned char)value[value_len - 1]))
+                --value_len;
+
+            native_headers[i].name.data = headers[i].name;
+            native_headers[i].name.len = (STRLEN)headers[i].name_len;
+            native_headers[i].value.data = value;
+            native_headers[i].value.len = (STRLEN)value_len;
+        }
+
+        input.headers = native_headers;
+        input.header_count = (Size_t)count;
+        native_request = uhttp_native_from_validated(
+            aTHX_ uniform_api, &input, UHTTP_NATIVE_TRUSTED
+        );
+        *request_out = native_request;
+    }
+
+    hv = newHV();
+    hv_store(hv, "ok", 2, newSViv(1), 0);
+    hv_store(hv, "consumed", 8, newSViv(consumed), 0);
+    if (native_request == NULL) {
+        hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
+        hv_store(hv, "method", 6, newSVpvn(method, (STRLEN)method_len), 0);
+        hv_store(hv, "target", 6, newSVpvn(target, (STRLEN)target_len), 0);
+        list = headers_to_av(aTHX_ headers, count);
+        hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
+    }
+
+    if (body_mode == UB_BODY_CHUNKED)
+        hv_store(hv, "body_mode", 9, newSVpvs("chunked"), 0);
+    else if (body_mode == UB_BODY_CONTENT_LENGTH)
+        hv_store(hv, "body_mode", 9, newSVpvs("content-length"), 0);
+    else
+        hv_store(hv, "body_mode", 9, newSVpvs("none"), 0);
+
+    if (has_cl)
+        hv_store(hv, "content_length", 14, newSVuv(content_length), 0);
+
+    hv_store(
+        hv, "keep_alive", 10,
+        newSViv(close_seen ? 0 : (minor >= 1 ? 1 : (keep_seen ? 1 : 0))),
+        0
+    );
+    hv_store(hv, "expect_continue", 15, newSViv(expect_mode), 0);
+
+    return newRV_noinc((SV *)hv);
+}
+
+static SV *
+ub_http1_parse_response_head_result(
+    pTHX_
+    const char *buf,
+    size_t buffer_len,
+    size_t last_len,
+    size_t max_headers,
+    const uhttp_native_api *uniform_api,
+    SV **response_out
+)
+{
     int minor;
     int status;
     const char *reason;
     size_t reason_len;
     struct phr_header headers[UB_HTTP1_MAX_HEADERS];
+    uhttp_native_field native_headers[UB_HTTP1_MAX_HEADERS];
     size_t count;
     int consumed;
+    size_t i;
+    char version_bytes[3];
+    SV *native_response = NULL;
     HV *hv;
     AV *list;
-  CODE:
-    (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
-    if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+
+    if (response_out != NULL)
+        *response_out = NULL;
+    if (last_len > buffer_len)
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
-    count = (size_t)max_headers;
-    consumed = phr_parse_response(buf, (size_t)buffer_len, &minor, &status,
-        &reason, &reason_len, headers, &count, (size_t)last_len);
-    if (consumed == -2) XSRETURN_UNDEF;
-    if (consumed == -1 || minor < 0 || minor > 9 || status < 100 || status > 599 ||
-        buffer_len < 13 || !memEQ(buf, "HTTP/1.", 7) ||
-        buf[7] < '0' || buf[7] > '9' || buf[8] != ' ' ||
-        buf[9] < '0' || buf[9] > '9' ||
-        buf[10] < '0' || buf[10] > '9' ||
-        buf[11] < '0' || buf[11] > '9' || buf[12] != ' ' ||
-        reason != buf + 13 ||
-        !valid_field_value(reason, reason_len) || !strict_headers(headers, count)) {
-        RETVAL = new_error_result(aTHX_ 0, "malformed HTTP/1 response");
-    } else {
-        hv = newHV();
-        hv_store(hv, "ok", 2, newSViv(1), 0);
-        hv_store(hv, "consumed", 8, newSViv(consumed), 0);
+
+    count = max_headers;
+    consumed = phr_parse_response(
+        buf, buffer_len, &minor, &status,
+        &reason, &reason_len, headers, &count, last_len
+    );
+
+    if (consumed == -2)
+        return NULL;
+
+    if (consumed == -1 || minor < 0 || minor > 9
+        || status < 100 || status > 599
+        || buffer_len < 13 || !memEQ(buf, "HTTP/1.", 7)
+        || buf[7] < '0' || buf[7] > '9' || buf[8] != ' '
+        || buf[9] < '0' || buf[9] > '9'
+        || buf[10] < '0' || buf[10] > '9'
+        || buf[11] < '0' || buf[11] > '9' || buf[12] != ' '
+        || reason != buf + 13
+        || !valid_field_value(reason, reason_len)
+        || !strict_headers(headers, count)) {
+        return new_error_result(aTHX_ 0, "malformed HTTP/1 response");
+    }
+
+    if (uniform_api != NULL && response_out != NULL) {
+        uhttp_native_input input;
+        int informational =
+            status >= 100 && status < 200 && status != 101 ? 1 : 0;
+
+        uhttp_native_input_init(&input, UHTTP_KIND_RESPONSE);
+        input.flags =
+            UHTTP_HEADERS_LOSSLESS
+            | UHTTP_TRAILERS_LOSSLESS;
+
+        if (informational) {
+            input.flags |= UHTTP_COMPLETE;
+        } else {
+            input.flags |=
+                UHTTP_MUTABLE
+                | UHTTP_BODY_MUTABLE
+                | UHTTP_TRAILERS_MUTABLE;
+        }
+
+        version_bytes[0] = '1';
+        version_bytes[1] = '.';
+        version_bytes[2] = (char)('0' + minor);
+        input.version.data = version_bytes;
+        input.version.len = 3;
+        input.status = (IV)status;
+        input.reason.data = reason;
+        input.reason.len = (STRLEN)reason_len;
+
+        for (i = 0; i < count; ++i) {
+            const char *value = headers[i].value;
+            size_t value_len = headers[i].value_len;
+
+            while (value_len && is_ows((unsigned char)*value)) {
+                ++value;
+                --value_len;
+            }
+            while (value_len
+                && is_ows((unsigned char)value[value_len - 1]))
+                --value_len;
+
+            native_headers[i].name.data = headers[i].name;
+            native_headers[i].name.len = (STRLEN)headers[i].name_len;
+            native_headers[i].value.data = value;
+            native_headers[i].value.len = (STRLEN)value_len;
+        }
+
+        input.headers = native_headers;
+        input.header_count = (Size_t)count;
+        native_response = uhttp_native_from_validated(
+            aTHX_ uniform_api, &input, UHTTP_NATIVE_TRUSTED
+        );
+        *response_out = native_response;
+    }
+
+    hv = newHV();
+    hv_store(hv, "ok", 2, newSViv(1), 0);
+    hv_store(hv, "consumed", 8, newSViv(consumed), 0);
+    hv_store(hv, "status", 6, newSViv(status), 0);
+    if (native_response == NULL) {
         hv_store(hv, "version", 7, newSVpvf("1.%d", minor), 0);
-        hv_store(hv, "status", 6, newSViv(status), 0);
-        hv_store(hv, "reason", 6, newSVpvn(reason, (STRLEN)reason_len), 0);
+        hv_store(
+            hv, "reason", 6,
+            newSVpvn(reason, (STRLEN)reason_len), 0
+        );
         list = headers_to_av(aTHX_ headers, count);
         hv_store(hv, "headers", 7, newRV_noinc((SV *)list), 0);
-        RETVAL = newRV_noinc((SV *)hv);
     }
+
+    return newRV_noinc((SV *)hv);
+}
+
+#define UB_HTTP1_INPUT_ABI_VERSION 1U
+#define UB_HTTP1_INPUT_OK 0
+#define UB_HTTP1_INPUT_MORE 1
+#define UB_HTTP1_INPUT_CLOSED 3
+#define UB_HTTP1_INPUT_SWITCH 4
+
+typedef struct {
+    const char *data;
+    size_t length;
+    size_t offset;
+    int valid;
+} ub_http1_borrowed_window;
+
+typedef struct {
+    SV *engine;
+    CV *input_cv;
+    CV *head_cv;
+    CV *eof_cv;
+    uhttp_native_api uniform_api;
+    int uniform_native;
+    int role;
+    int direct_head;
+    size_t max_headers;
+    size_t max_head_size;
+} ub_http1_input_context;
+
+typedef struct {
+    uint32_t abi_version;
+    size_t struct_size;
+    const char *name;
+    void *(*create)(pTHX_ SV *engine);
+    int (*input)(pTHX_ void *context, const char *data, size_t length,
+        size_t *consumed);
+    int (*eof)(pTHX_ void *context);
+    void (*destroy)(pTHX_ void *context);
+} ub_http1_input_ops_v1;
+
+static ub_http1_borrowed_window *
+ub_http1_window_from_sv(pTHX_ SV *sv)
+{
+    SV *inner;
+    ub_http1_borrowed_window *window;
+
+    if (!SvROK(sv)
+        || !sv_derived_from(sv, "Unblock::HTTP1::_Native::BorrowedWindow"))
+        croak("not an Unblock::HTTP1 borrowed input window");
+
+    inner = SvRV(sv);
+    window = INT2PTR(ub_http1_borrowed_window *, SvIV(inner));
+    if (window == NULL || !window->valid)
+        croak("borrowed input window is no longer valid");
+    if (window->offset > window->length)
+        croak("corrupt borrowed input window");
+    return window;
+}
+
+static const char *
+ub_http1_buffer_view(pTHX_ SV *buffer, STRLEN *length)
+{
+    if (SvROK(buffer)
+        && sv_derived_from(buffer, "Unblock::HTTP1::_Native::BorrowedWindow")) {
+        ub_http1_borrowed_window *window =
+            ub_http1_window_from_sv(aTHX_ buffer);
+        size_t remaining = window->length - window->offset;
+        if (remaining > (size_t)~(STRLEN)0)
+            croak("borrowed input window exceeds Perl string length range");
+        *length = (STRLEN)remaining;
+        return window->data + window->offset;
+    }
+
+    return SvPVbyte(buffer, *length);
+}
+
+static CV *
+ub_http1_engine_method_cv(
+    pTHX_
+    ub_http1_input_context *context,
+    CV **slot,
+    const char *name
+)
+{
+    GV *gv;
+    CV *cv;
+
+    if (*slot != NULL)
+        return *slot;
+
+    if (!SvROK(context->engine))
+        croak("Unblock::HTTP1 native input engine is not an object");
+
+    gv = gv_fetchmethod_autoload(SvSTASH(SvRV(context->engine)), name, 0);
+    if (gv == NULL || (cv = GvCV(gv)) == NULL)
+        croak("Unblock::HTTP1 native input method %s is unavailable", name);
+
+    *slot = (CV *)SvREFCNT_inc((SV *)cv);
+    return *slot;
+}
+
+static int
+ub_http1_call_engine_scalar(
+    pTHX_
+    ub_http1_input_context *context,
+    CV **slot,
+    const char *name,
+    SV *arg
+)
+{
+    CV *cv = ub_http1_engine_method_cv(aTHX_ context, slot, name);
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    if (arg != NULL)
+        XPUSHs(arg);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_SCALAR | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV))
+        error = newSVsv(ERRSV);
+    else if (count > 0)
+        result = POPi;
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
+static int
+ub_http1_call_engine_input(
+    pTHX_
+    ub_http1_input_context *context,
+    SV *window,
+    size_t length,
+    SV *head,
+    SV *message,
+    size_t *consumed,
+    int *head_ready
+)
+{
+    CV *cv = ub_http1_engine_method_cv(
+        aTHX_ context, &context->input_cv, "_input_borrowed"
+    );
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    SV *ready_sv;
+    SV *consumed_sv;
+    SV *status_sv;
+    UV consumed_uv;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    XPUSHs(window);
+    mPUSHu((UV)length);
+    XPUSHs(head != NULL ? head : &PL_sv_undef);
+    XPUSHs(message != NULL ? message : &PL_sv_undef);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    } else {
+        if (count != 3)
+            croak("Unblock::HTTP1 native input returned the wrong number of values");
+        ready_sv = POPs;
+        consumed_sv = POPs;
+        status_sv = POPs;
+        consumed_uv = SvUV(consumed_sv);
+        if (consumed_uv > (UV)length)
+            croak("Unblock::HTTP1 native input consumed beyond its window");
+        *consumed = (size_t)consumed_uv;
+        *head_ready = SvTRUE(ready_sv) ? 1 : 0;
+        result = SvIV(status_sv);
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
+static int
+ub_http1_call_engine_head(
+    pTHX_
+    ub_http1_input_context *context,
+    SV *head,
+    SV *message,
+    int *head_ready
+)
+{
+    CV *cv = ub_http1_engine_method_cv(
+        aTHX_ context, &context->head_cv, "_input_native_head"
+    );
+    int result = 0;
+    int count;
+    SV *error = NULL;
+    SV *ready_sv;
+    SV *status_sv;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    XPUSHs(head);
+    XPUSHs(message != NULL ? message : &PL_sv_undef);
+    PUTBACK;
+    count = call_sv((SV *)cv, G_ARRAY | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    } else {
+        if (count != 2)
+            croak("Unblock::HTTP1 native head dispatch returned the wrong number of values");
+        ready_sv = POPs;
+        status_sv = POPs;
+        *head_ready = SvTRUE(ready_sv) ? 1 : 0;
+        result = SvIV(status_sv);
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error != NULL) {
+        const char *message = SvPV_nolen(error);
+        croak("%s", message);
+    }
+
+    return result;
+}
+
+static int
+ub_http1_input_can_direct_head(pTHX_ ub_http1_input_context *context)
+{
+    HV *engine_hv;
+    SV **value;
+    int active = 0;
+
+    if (context == NULL || context->role == 0
+        || context->engine == NULL || !SvROK(context->engine)
+        || SvTYPE(SvRV(context->engine)) != SVt_PVHV)
+        return 0;
+
+    engine_hv = (HV *)SvRV(context->engine);
+
+    value = hv_fetch(engine_hv, "closed", 6, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "switched", 8, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "input", 5, 0);
+    if (value != NULL && SvOK(*value) && SvCUR(*value) != 0)
+        return 0;
+
+    value = hv_fetch(engine_hv, "rx", 2, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        return 0;
+
+    value = hv_fetch(engine_hv, "active", 6, 0);
+    if (value != NULL && SvOK(*value) && SvTRUE(*value))
+        active = 1;
+
+    return context->role == 1 ? !active : active;
+}
+
+static void *
+ub_http1_input_create(pTHX_ SV *engine)
+{
+    ub_http1_input_context *context;
+
+    if (!SvROK(engine)
+        || !sv_derived_from(engine, "Unblock::HTTP1::_Engine"))
+        return NULL;
+
+    Newxz(context, 1, ub_http1_input_context);
+    if (context == NULL)
+        return NULL;
+
+    context->engine = SvREFCNT_inc(engine);
+    context->uniform_native = uhttp_native_init(
+        aTHX_ &context->uniform_api, UHTTP_NATIVE_ABI_VERSION
+    );
+    context->role = sv_derived_from(engine, "Unblock::HTTP1::Server") ? 1
+        : sv_derived_from(engine, "Unblock::HTTP1::Client") ? 2 : 0;
+    context->direct_head = 0;
+    context->max_headers = 100;
+    context->max_head_size = 65536;
+
+    if (SvTYPE(SvRV(engine)) == SVt_PVHV) {
+        HV *engine_hv = (HV *)SvRV(engine);
+        SV **value;
+
+        value = hv_fetch(engine_hv, "max_headers", 11, 0);
+        if (value != NULL && SvOK(*value))
+            context->max_headers = (size_t)SvUV(*value);
+
+        value = hv_fetch(engine_hv, "max_head_size", 13, 0);
+        if (value != NULL && SvOK(*value))
+            context->max_head_size = (size_t)SvUV(*value);
+
+    }
+
+    context->direct_head = ub_http1_input_can_direct_head(aTHX_ context);
+    return context;
+}
+
+static int
+ub_http1_input_borrowed(
+    pTHX_
+    void *opaque,
+    const char *data,
+    size_t length,
+    size_t *consumed
+)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+    ub_http1_borrowed_window *window = NULL;
+    SV *object = NULL;
+    SV *head = NULL;
+    SV *message = NULL;
+    SV *window_arg = &PL_sv_undef;
+    int head_ready = 0;
+    int head_only = 0;
+    int need_window = 1;
+    int result;
+
+    if (context == NULL || consumed == NULL)
+        croak("invalid Unblock::HTTP1 native input context");
+
+    *consumed = 0;
+    if (data == NULL)
+        data = "";
+
+    context->direct_head = ub_http1_input_can_direct_head(aTHX_ context);
+
+    if (context->direct_head && context->role == 1) {
+        head = ub_http1_parse_request_head_result(
+            aTHX_
+            data,
+            length,
+            0,
+            context->max_headers,
+            context->uniform_native ? &context->uniform_api : NULL,
+            &message
+        );
+
+        if (head == NULL) {
+            if (length <= context->max_head_size)
+                return UB_HTTP1_INPUT_MORE;
+            head = new_error_result(
+                aTHX_ 431, "request head exceeds configured limit"
+            );
+            need_window = 0;
+        } else if (SvROK(head) && SvTYPE(SvRV(head)) == SVt_PVHV) {
+            HV *head_hv = (HV *)SvRV(head);
+            SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
+
+            if (ok_sv != NULL && SvTRUE(*ok_sv)) {
+                SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
+                if (consumed_sv != NULL && SvOK(*consumed_sv)) {
+                    UV head_consumed = SvUV(*consumed_sv);
+                    if (head_consumed <= (UV)length
+                        && head_consumed == (UV)length) {
+                        need_window = 0;
+                        head_only = 1;
+                    }
+                }
+            } else {
+                need_window = 0;
+            }
+        }
+    } else if (context->direct_head && context->role == 2) {
+        head = ub_http1_parse_response_head_result(
+            aTHX_
+            data,
+            length,
+            0,
+            context->max_headers,
+            context->uniform_native ? &context->uniform_api : NULL,
+            &message
+        );
+
+        if (head == NULL) {
+            if (length <= context->max_head_size)
+                return UB_HTTP1_INPUT_MORE;
+            head = new_error_result(
+                aTHX_ 0, "HTTP/1 response head exceeds configured limit"
+            );
+            need_window = 0;
+        } else if (SvROK(head) && SvTYPE(SvRV(head)) == SVt_PVHV) {
+            HV *head_hv = (HV *)SvRV(head);
+            SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
+
+            if (ok_sv != NULL && SvTRUE(*ok_sv)) {
+                SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
+                if (consumed_sv != NULL && SvOK(*consumed_sv)) {
+                    UV head_consumed = SvUV(*consumed_sv);
+                    if (head_consumed <= (UV)length
+                        && head_consumed == (UV)length) {
+                        need_window = 0;
+                        head_only = 1;
+                    }
+                }
+            } else {
+                need_window = 0;
+            }
+        }
+    }
+
+    if (head_only) {
+        int jump_status;
+        dJMPENV;
+
+        *consumed = length;
+        JMPENV_PUSH(jump_status);
+        if (jump_status == 0) {
+            result = ub_http1_call_engine_head(
+                aTHX_ context, head, message, &head_ready
+            );
+            JMPENV_POP;
+        } else {
+            JMPENV_POP;
+            if (message != NULL)
+                SvREFCNT_dec(message);
+            SvREFCNT_dec(head);
+            JMPENV_JUMP(jump_status);
+        }
+
+        if (message != NULL)
+            SvREFCNT_dec(message);
+        SvREFCNT_dec(head);
+
+        if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
+            || result == 2)
+            croak("Unblock::HTTP1 engine returned invalid native input status");
+
+        context->direct_head = head_ready;
+        return result;
+    }
+
+    if (need_window) {
+        SV *inner;
+
+        Newxz(window, 1, ub_http1_borrowed_window);
+        if (window == NULL) {
+            if (head != NULL)
+                SvREFCNT_dec(head);
+            croak("unable to allocate borrowed input window");
+        }
+
+        window->data = data;
+        window->length = length;
+        window->offset = 0;
+        window->valid = 1;
+
+        inner = newSViv(PTR2IV(window));
+        object = newRV_noinc(inner);
+        sv_bless(object,
+            gv_stashpv("Unblock::HTTP1::_Native::BorrowedWindow", GV_ADD));
+        window_arg = object;
+    }
+
+    {
+        int jump_status;
+        dJMPENV;
+
+        JMPENV_PUSH(jump_status);
+        if (jump_status == 0) {
+            result = ub_http1_call_engine_input(
+                aTHX_
+                context,
+                window_arg,
+                length,
+                head,
+                message,
+                consumed,
+                &head_ready
+            );
+            JMPENV_POP;
+        } else {
+            JMPENV_POP;
+            if (window != NULL)
+                window->valid = 0;
+            if (object != NULL)
+                SvREFCNT_dec(object);
+            if (message != NULL)
+                SvREFCNT_dec(message);
+            if (head != NULL)
+                SvREFCNT_dec(head);
+            JMPENV_JUMP(jump_status);
+        }
+    }
+
+    if (window != NULL)
+        window->valid = 0;
+    if (object != NULL)
+        SvREFCNT_dec(object);
+    if (message != NULL)
+        SvREFCNT_dec(message);
+    if (head != NULL)
+        SvREFCNT_dec(head);
+
+    if (result < UB_HTTP1_INPUT_OK || result > UB_HTTP1_INPUT_SWITCH
+        || result == 2)
+        croak("Unblock::HTTP1 engine returned invalid native input status");
+
+    if (context->role)
+        context->direct_head = head_ready;
+
+    return result;
+}
+
+static int
+ub_http1_input_eof(pTHX_ void *opaque)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+    int result;
+
+    if (context == NULL)
+        croak("invalid Unblock::HTTP1 native input context");
+
+    result = ub_http1_call_engine_scalar(
+        aTHX_
+        context,
+        &context->eof_cv,
+        "_borrowed_input_eof",
+        NULL
+    );
+
+    if (result != UB_HTTP1_INPUT_OK
+        && result != UB_HTTP1_INPUT_CLOSED
+        && result != UB_HTTP1_INPUT_SWITCH)
+        croak("Unblock::HTTP1 engine returned invalid native EOF status");
+
+    return result;
+}
+
+static void
+ub_http1_input_destroy(pTHX_ void *opaque)
+{
+    ub_http1_input_context *context = (ub_http1_input_context *)opaque;
+
+    PERL_UNUSED_CONTEXT;
+    if (context == NULL)
+        return;
+
+    if (context->input_cv != NULL)
+        SvREFCNT_dec((SV *)context->input_cv);
+    if (context->head_cv != NULL)
+        SvREFCNT_dec((SV *)context->head_cv);
+    if (context->eof_cv != NULL)
+        SvREFCNT_dec((SV *)context->eof_cv);
+    if (context->engine != NULL)
+        SvREFCNT_dec(context->engine);
+    Safefree(context);
+}
+
+static const ub_http1_input_ops_v1 ub_http1_input_ops = {
+    UB_HTTP1_INPUT_ABI_VERSION,
+    sizeof(ub_http1_input_ops_v1),
+    "Unblock::HTTP1 borrowed input",
+    ub_http1_input_create,
+    ub_http1_input_borrowed,
+    ub_http1_input_eof,
+    ub_http1_input_destroy
+};
+
+MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native
+PROTOTYPES: DISABLE
+
+UV
+_borrowed_input_operations_address()
+  CODE:
+    RETVAL = PTR2UV(&ub_http1_input_ops);
+  OUTPUT:
+    RETVAL
+
+void
+_borrowed_input_once(engine, buffer)
+    SV *engine
+    SV *buffer
+  PREINIT:
+    STRLEN buffer_len;
+    const char *data;
+    void *context;
+    size_t consumed = 0;
+    int status;
+  PPCODE:
+    data = SvPVbyte(buffer, buffer_len);
+    context = ub_http1_input_create(aTHX_ engine);
+    if (context == NULL)
+        croak("engine does not support Unblock::HTTP1 native input");
+    status = ub_http1_input_borrowed(
+        aTHX_ context, data, (size_t)buffer_len, &consumed
+    );
+    ub_http1_input_destroy(aTHX_ context);
+    XPUSHs(sv_2mortal(newSViv(status)));
+    XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
+
+const char *
+pico_version(CLASS)
+    const char *CLASS
+  CODE:
+    (void)CLASS;
+    RETVAL = PICOHTTPPARSER_VERSION;
   OUTPUT:
     RETVAL
 
 SV *
-parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
+parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
     const char *CLASS
     SV *buffer
     UV last_len
     UV max_headers
+    UV offset
+  PREINIT:
+    STRLEN buffer_len;
+    const char *buf;
+  CODE:
+    (void)CLASS;
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
+    RETVAL = ub_http1_parse_request_head_result(
+        aTHX_
+        buf,
+        (size_t)buffer_len,
+        (size_t)last_len,
+        (size_t)max_headers,
+        NULL,
+        NULL
+    );
+    if (RETVAL == NULL)
+        XSRETURN_UNDEF;
+  OUTPUT:
+    RETVAL
+
+SV *
+parse_response_head(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
+    const char *CLASS
+    SV *buffer
+    UV last_len
+    UV max_headers
+    UV offset
+  PREINIT:
+    STRLEN buffer_len;
+    const char *buf;
+  CODE:
+    (void)CLASS;
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
+    RETVAL = ub_http1_parse_response_head_result(
+        aTHX_
+        buf,
+        (size_t)buffer_len,
+        (size_t)last_len,
+        (size_t)max_headers,
+        NULL,
+        NULL
+    );
+    if (RETVAL == NULL)
+        XSRETURN_UNDEF;
+  OUTPUT:
+    RETVAL
+
+SV *
+parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100, offset = 0)
+    const char *CLASS
+    SV *buffer
+    UV last_len
+    UV max_headers
+    UV offset
   PREINIT:
     STRLEN buffer_len;
     const char *buf;
@@ -678,9 +1547,13 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
     AV *list;
   CODE:
     (void)CLASS;
-    buf = SvPVbyte(buffer, buffer_len);
+    buf = ub_http1_buffer_view(aTHX_ buffer, &buffer_len);
+    if (offset > (UV)buffer_len)
+        croak("offset exceeds buffer length");
+    buf += (size_t)offset;
+    buffer_len -= (STRLEN)offset;
     if (last_len > (UV)buffer_len)
-        croak("last_len exceeds buffer length");
+        croak("last_len exceeds input window length");
     if (max_headers == 0 || max_headers > UB_HTTP1_MAX_HEADERS)
         croak("max_headers must be between 1 and %d", UB_HTTP1_MAX_HEADERS);
     count = (size_t)max_headers;
@@ -698,6 +1571,232 @@ parse_trailers(CLASS, buffer, last_len = 0, max_headers = 100)
     }
   OUTPUT:
     RETVAL
+
+MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedDriver
+
+SV *
+new(CLASS, engine)
+    const char *CLASS
+    SV *engine
+  PREINIT:
+    ub_http1_input_context *context;
+    SV *inner;
+    SV *object;
+  CODE:
+    context = (ub_http1_input_context *)ub_http1_input_create(aTHX_ engine);
+    if (context == NULL)
+        croak("engine does not support Unblock::HTTP1 native input");
+    inner = newSViv(PTR2IV(context));
+    object = newRV_noinc(inner);
+    sv_bless(object, gv_stashpv(CLASS, GV_ADD));
+    RETVAL = object;
+  OUTPUT:
+    RETVAL
+
+void
+feed(self, buffer)
+    SV *self
+    SV *buffer
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+    STRLEN buffer_len;
+    const char *data;
+    size_t consumed = 0;
+    int status;
+  PPCODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    data = SvPVbyte(buffer, buffer_len);
+    status = ub_http1_input_borrowed(
+        aTHX_ context, data, (size_t)buffer_len, &consumed
+    );
+    XPUSHs(sv_2mortal(newSViv(status)));
+    XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
+
+UV
+feed_repeat(self, buffer, count)
+    SV *self
+    SV *buffer
+    UV count
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+    STRLEN buffer_len;
+    const char *data;
+    UV i;
+  CODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    data = SvPVbyte(buffer, buffer_len);
+    for (i = 0; i < count; ++i) {
+        size_t consumed = 0;
+        int status = ub_http1_input_borrowed(
+            aTHX_ context, data, (size_t)buffer_len, &consumed
+        );
+        if (status != UB_HTTP1_INPUT_OK
+            || consumed != (size_t)buffer_len)
+            croak("borrowed repeat input did not consume complete window");
+    }
+    RETVAL = count;
+  OUTPUT:
+    RETVAL
+
+int
+eof(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+  CODE:
+    if (!SvROK(self)
+        || !sv_derived_from(self, "Unblock::HTTP1::_Native::BorrowedDriver"))
+        croak("not an Unblock::HTTP1 borrowed input driver");
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        croak("borrowed input driver has already been released");
+    RETVAL = ub_http1_input_eof(aTHX_ context);
+  OUTPUT:
+    RETVAL
+
+void
+DESTROY(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_input_context *context;
+  CODE:
+    if (!SvROK(self))
+        XSRETURN_EMPTY;
+    inner = SvRV(self);
+    context = INT2PTR(ub_http1_input_context *, SvIV(inner));
+    if (context == NULL)
+        XSRETURN_EMPTY;
+    ub_http1_input_destroy(aTHX_ context);
+    sv_setiv(inner, 0);
+
+MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::BorrowedWindow
+
+SV *
+slice(self, offset, length)
+    SV *self
+    UV offset
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    if (offset > (UV)window->length
+        || length > (UV)(window->length - (size_t)offset))
+        croak("borrowed input slice exceeds window");
+    RETVAL = newSVpvn(
+        window->data + (size_t)offset,
+        (STRLEN)length
+    );
+  OUTPUT:
+    RETVAL
+
+UV
+remaining(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    RETVAL = (UV)(window->length - window->offset);
+  OUTPUT:
+    RETVAL
+
+UV
+consumed(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    RETVAL = (UV)window->offset;
+  OUTPUT:
+    RETVAL
+
+SV *
+take(self, length)
+    SV *self
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    if (length > (UV)remaining)
+        croak("borrowed input take exceeds remaining window");
+    RETVAL = newSVpvn(window->data + window->offset, (STRLEN)length);
+    window->offset += (size_t)length;
+  OUTPUT:
+    RETVAL
+
+void
+discard(self, length)
+    SV *self
+    UV length
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    if (length > (UV)remaining)
+        croak("borrowed input discard exceeds remaining window");
+    window->offset += (size_t)length;
+
+void
+clear(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    window->offset = window->length;
+
+SV *
+remaining_bytes(self)
+    SV *self
+  PREINIT:
+    ub_http1_borrowed_window *window;
+    size_t remaining;
+  CODE:
+    window = ub_http1_window_from_sv(aTHX_ self);
+    remaining = window->length - window->offset;
+    RETVAL = newSVpvn(window->data + window->offset, (STRLEN)remaining);
+  OUTPUT:
+    RETVAL
+
+void
+DESTROY(self)
+    SV *self
+  PREINIT:
+    SV *inner;
+    ub_http1_borrowed_window *window;
+  CODE:
+    if (!SvROK(self))
+        XSRETURN_EMPTY;
+    inner = SvRV(self);
+    window = INT2PTR(ub_http1_borrowed_window *, SvIV(inner));
+    if (window == NULL)
+        XSRETURN_EMPTY;
+    Safefree(window);
+    sv_setiv(inner, 0);
 
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native::Chunked
 
@@ -723,10 +1822,11 @@ new(CLASS, max_chunk_extension_size = 16384)
     RETVAL
 
 void
-feed(self, input, emit = 1)
+feed(self, input, emit = 1, offset = 0)
     SV *self
     SV *input
     int emit
+    UV offset
   PREINIT:
     struct phr_chunked_decoder *decoder;
     SV *inner;
@@ -742,7 +1842,11 @@ feed(self, input, emit = 1)
     inner = SvRV(self);
     decoder = INT2PTR(struct phr_chunked_decoder *, SvIV(inner));
     if (!decoder) croak("chunked decoder has already been released");
-    input_bytes = SvPVbyte(input, input_len);
+    input_bytes = ub_http1_buffer_view(aTHX_ input, &input_len);
+    if (offset > (UV)input_len)
+        croak("offset exceeds input length");
+    input_bytes += (size_t)offset;
+    input_len -= (STRLEN)offset;
     Newx(scratch, input_len ? input_len : 1, char);
     if (input_len) Copy(input_bytes, scratch, input_len, char);
     decoded_len = (size_t)input_len;

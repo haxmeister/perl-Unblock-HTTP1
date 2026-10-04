@@ -1323,17 +1323,25 @@ sub request_plan {
 }
 
 sub response_receive_plan {
-    my ($request, $head) = @_;
+    my ($request, $head, $response) = @_;
     my $request_view = _fast_request_view($request);
-    my $fields = $head->{headers};
-    my $status = $head->{status};
+    my $response_view = $response ? _fast_response_view($response) : undef;
+    my $fields = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_HEADERS()]
+        : $head->{headers};
+    my $status = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_STATUS()]
+        : $head->{status};
+    my $version = $response_view
+        ? $response_view->[Uniform::HTTP::FastPath::SLOT_VERSION()]
+        : $head->{version};
     my $method = $request_view
         ? $request_view->[Uniform::HTTP::FastPath::SLOT_METHOD()]
         : $request->method;
 
     if ($method eq 'CONNECT' && $status >= 200 && $status < 300) {
         croak 'HTTP/1 CONNECT successful response must use HTTP/1.1 semantics'
-            unless _semantics_version($head->{version}) eq '1.1';
+            unless _semantics_version($version) eq '1.1';
         return {
             mode       => 'none',
             remaining  => undef,
@@ -1347,7 +1355,7 @@ sub response_receive_plan {
             $request,
             _fields($request, 'header', $request_view),
             $fields,
-            $head->{version},
+            $version,
             $request_view,
         );
         return {
@@ -1358,7 +1366,7 @@ sub response_receive_plan {
         };
     }
 
-    my $response_semantics = _semantics_version($head->{version});
+    my $response_semantics = _semantics_version($version);
     my $tokens = _connection_tokens($fields);
     my $keep_alive = $tokens->{close} ? 0
         : $response_semantics eq '1.1' ? 1

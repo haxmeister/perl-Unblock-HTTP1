@@ -63,6 +63,17 @@ The XS backend is intentionally independent of transports and event loops. It
 does not know about file descriptors, readiness APIs, watcher objects, or
 framework-specific native consumer interfaces.
 
+The optional NativeABI exposes the same receive engine to native transports
+through borrowed contiguous input windows. The host retains ownership of the
+window and Unblock reports the consumed prefix. Parser state and HTTP lifecycle
+remain in this distribution; a framework bridge only moves bytes and maps the
+ABI result to its own read/pause/switch behavior.
+
+The native receive path constructs exact canonical Uniform requests and
+responses directly from validated parser byte spans through the Uniform::HTTP
+0.06 native FastPath header. The final message owns its copied Perl storage; no
+parser pointer or transport buffer is retained by the message.
+
 Portable HTTP parsing and framing optimizations belong here. Transport-specific
 bridges belong in adapters outside the protocol engine.
 

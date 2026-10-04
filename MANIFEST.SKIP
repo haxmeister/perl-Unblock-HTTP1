@@ -12,3 +12,4 @@
 ^HTTP1\.bs$
 ^HTTP1\.o$
 ^Unblock-HTTP1-
+^Handoff\.md$

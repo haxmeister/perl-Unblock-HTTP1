@@ -9,6 +9,7 @@ docs/INTEGRATION.md
 docs/PROTOCOL_STATUS.md
 lib/Unblock/HTTP1.pm
 lib/Unblock/HTTP1/Client.pm
+lib/Unblock/HTTP1/NativeABI.pm
 lib/Unblock/HTTP1/Server.pm
 lib/Unblock/HTTP1/Transaction.pm
 lib/Unblock/HTTP1/_Engine.pm
@@ -44,6 +45,7 @@ t/44-serialization-security.t
 t/45-connection-options.t
 t/46-te-negotiation.t
 t/47-uniform-fastpath.t
+t/48-native-borrowed-input.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c

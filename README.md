@@ -11,6 +11,12 @@ boundaries, but it does not open sockets or choose an event loop.
 
 The same engine can be used with any reliable ordered byte stream.
 
+The normal API accepts Perl byte strings. XS-backed transports can optionally
+use `Unblock::HTTP1::NativeABI` to feed borrowed native buffers directly. The
+transport keeps ownership of the buffer and Unblock reports how much of it was
+consumed. On this path, received requests and responses are constructed as
+canonical Uniform::HTTP objects through the Uniform::HTTP 0.06 native FastPath.
+
 ## What it does
 
 Unblock::HTTP1 provides:
@@ -27,6 +33,7 @@ Unblock::HTTP1 provides:
 - Upgrade and CONNECT boundaries
 - configurable protocol limits
 - Uniform::HTTP request and response objects
+- optional borrowed native input ABI for XS transports
 
 It does not provide sockets, DNS, TLS, connection pools, redirects, cookies,
 authentication, proxy policy, WebSocket framing, HTTP/2, or HTTP/3.

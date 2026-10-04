@@ -66,6 +66,122 @@ sub input {
     return length $copy;
 }
 
+sub _input_borrowed {
+    my ($self, $window, $length, $head, $message) = @_;
+    croak '_input_borrowed(): cannot be called recursively from an engine callback'
+        if $self->{driving};
+    return (4, 0, 0) if $self->{switched};
+    return (3, 0, 0) if $self->{closed};
+    if (length $self->{input}) {
+        croak '_input_borrowed(): buffered fallback requires a native input window'
+            unless ref($window)
+                && $window->isa('Unblock::HTTP1::_Native::BorrowedWindow');
+        $self->{input} .= $window->slice(0, $length);
+        local $self->{driving} = 1;
+        $self->_drive;
+
+        my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
+        return ($status, $length, $self->_borrowed_native_head_ready);
+    }
+
+    my ($status, $consumed);
+    {
+        local $self->{borrowed_input} = $window;
+        local $self->{borrowed_length} = $length;
+        local $self->{borrowed_offset} = 0;
+        local $self->{borrowed_head} = $head;
+        local $self->{borrowed_message} = $message;
+        local $self->{driving} = 1;
+        $self->_drive;
+
+        my $remaining = $self->_input_length;
+        if ($self->{closed}) {
+            $status = 3;
+        } elsif ($self->{switched}) {
+            $status = 4;
+        } elsif ($remaining && $self->_borrowed_should_buffer_tail) {
+            $self->{input} .= $self->_input_take($remaining);
+            $status = 0;
+        } elsif ($remaining) {
+            $status = 1;
+        } else {
+            $status = 0;
+        }
+        $consumed = $self->{borrowed_offset};
+        my $head_ready = $self->_borrowed_native_head_ready;
+        return ($status, $consumed, $head_ready);
+    }
+}
+
+sub _borrowed_input_eof {
+    my ($self) = @_;
+    $self->input_eof;
+    return 4 if $self->{switched};
+    return 3 if $self->{closed};
+    return 0;
+}
+
+sub _input_length {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        return $self->{borrowed_length} - $self->{borrowed_offset};
+    }
+    return length $self->{input};
+}
+
+sub _input_window {
+    my ($self) = @_;
+    return ($self->{borrowed_input}, $self->{borrowed_offset})
+        if exists $self->{borrowed_input};
+    return ($self->{input}, 0);
+}
+
+sub _input_take {
+    my ($self, $length) = @_;
+    return '' unless $length;
+    if (exists $self->{borrowed_input}) {
+        my $offset = $self->{borrowed_offset};
+        my $bytes = $self->{borrowed_input}->slice($offset, $length);
+        $self->{borrowed_offset} += $length;
+        return $bytes;
+    }
+    return substr($self->{input}, 0, $length, '');
+}
+
+sub _input_discard {
+    my ($self, $length) = @_;
+    return unless $length;
+    if (exists $self->{borrowed_input}) {
+        $self->{borrowed_offset} += $length;
+        return;
+    }
+    substr($self->{input}, 0, $length, '');
+    return;
+}
+
+sub _input_clear {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        $self->{borrowed_offset} = $self->{borrowed_length};
+    } else {
+        $self->{input} = '';
+    }
+    return;
+}
+
+sub _input_remaining {
+    my ($self) = @_;
+    if (exists $self->{borrowed_input}) {
+        return $self->{borrowed_input}->slice(
+            $self->{borrowed_offset}, $self->_input_length,
+        );
+    }
+    return $self->{input};
+}
+
+sub _borrowed_should_buffer_tail { 0 }
+sub _borrowed_native_head_ready { 0 }
+
 sub input_eof {
     my ($self) = @_;
     return $self if $self->{eof};
@@ -119,8 +235,10 @@ sub _mark_switched {
     my ($self) = @_;
     return if $self->{switched};
     $self->{switched} = 1;
-    $self->{remainder} .= $self->{input};
-    $self->{input} = '';
+    if (!exists $self->{borrowed_input}) {
+        $self->{remainder} .= $self->{input};
+        $self->{input} = '';
+    }
     return;
 }
 
