@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feature/uniform-http-fastpath
     paths:
       - 'bench/**'
       - 'lib/Unblock/HTTP1.pm'
