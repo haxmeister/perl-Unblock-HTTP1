@@ -107,22 +107,29 @@ framing responsibilities:
 Linux::Event::HTTP can continue to own those responsibilities while delegating
 HTTP/1 bytes and message boundaries to Unblock::HTTP1.
 
+## Validation completed before Linux::Event integration
+
+The portable engine now has:
+
+- cross-platform CI on Linux, macOS, and Windows, including Perl 5.16;
+- dedicated lifecycle and callback reentrancy regressions;
+- standalone benchmarks for parsing and serialization;
+- complete small GET, fixed-length body, and chunked streaming exchanges.
+
 ## Remaining before Linux::Event integration
 
-The portable behavior is now broadly covered. Before replacing the existing
-Linux::Event::HTTP HTTP/1 path, the remaining work should focus on:
+The remaining work is now primarily performance and integration work:
 
-1. finish the full cross-platform parity matrix and keep it green;
-2. audit message lifecycle and callback reentrancy edge cases;
-3. add standalone benchmarks for parse, serialize, fixed body, chunked body,
-   and complete client/server exchanges;
-4. compare the hot paths against the current Linux::Event::HTTP native HTTP/1
+1. keep the cross-platform parity matrix green while optimization continues;
+2. compare the hot paths against the current Linux::Event::HTTP native HTTP/1
    implementation;
-5. move common serialization/state transitions into XS only where benchmarks
+3. profile message construction, serialization planning, and state transitions
+   identified by those comparisons;
+4. move additional serialization/state work into XS only where benchmarks
    justify it;
-6. define the optional Linux::Event native Stream-consumer bridge without
+5. define the optional Linux::Event native Stream-consumer bridge without
    making it part of the portable Unblock API;
-7. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
+6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
    existing HTTP/1 suite unchanged where practical.
 
 The Linux::Event adapter must remain an optimization and transport binding.
