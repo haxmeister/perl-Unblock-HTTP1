@@ -112,12 +112,13 @@ sub _drive {
                 if $head->{consumed} > $self->{max_head_size};
             substr($self->{input}, 0, $head->{consumed}, '');
 
-            my $response = Uniform::HTTP::Response->new(
-                status  => $head->{status},
-                reason  => $head->{reason},
-                version => $head->{version},
-                headers => $head->{headers},
-            );
+            my $informational =
+                $head->{status} >= 100 && $head->{status} < 200
+                && $head->{status} != 101 ? 1 : 0;
+            my $response =
+                Unblock::HTTP1::_Wire::_response_from_validated_head(
+                    $head, $informational,
+                );
 
             my $plan;
             my $ok = eval {
@@ -126,14 +127,12 @@ sub _drive {
             };
             return $self->_connection_error("$@") unless $ok;
 
-            if ($head->{status} >= 100 && $head->{status} < 200 && $head->{status} != 101) {
-                $response->freeze;
+            if ($informational) {
                 my $cb = $tx->_invoke('on_informational', $response);
                 return $self->_connection_error($cb) unless $cb eq '1';
                 next;
             }
 
-            $response->mark_incomplete->freeze_initial;
             $tx->_set_response($response);
 
             my $fixed_ready = !$plan->{switch}
