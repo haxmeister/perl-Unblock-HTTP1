@@ -29,8 +29,8 @@ Revision history for Unblock-HTTP1
     - Callback and message-finalization diagnostics show those lifecycle calls
       are not useful optimization targets.
     - Added an explicit distribution MANIFEST and CI disttest coverage.
-    - Documented the portable Linux::Event adapter and optional native bridge
-      boundary without introducing Linux-specific engine code.
+    - Documented the portable adapter boundary and kept transport-specific
+      native bridges outside the engine.
     - Originating response transfer-coding chains now mirror receive framing:
       final chunked is owned by Unblock and non-chunked final codings close.
     - Received absolute-form and CONNECT requests expose explicit Uniform
