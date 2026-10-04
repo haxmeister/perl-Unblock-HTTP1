@@ -137,6 +137,10 @@ Current standalone measurements show:
 - the trusted-construction result is symmetric across request and response
   objects, making repeated Uniform validation the clearest remaining
   receive-side cost;
+- protected server and Transaction callback dispatch benchmarks above one
+  million calls per second, and completion/freeze transitions are faster still,
+  so callback safety and message-finalization method calls are not useful
+  optimization targets;
 - connection object reuse changes standalone throughput much less than the
   per-message lifecycle, so optimization should remain focused on transaction
   work rather than engine construction.
@@ -151,15 +155,19 @@ The remaining work is now primarily performance and integration work:
 1. keep the cross-platform parity matrix green while optimization continues;
 2. compare the hot paths against the current Linux::Event::HTTP native HTTP/1
    implementation;
-3. profile Uniform message construction, callback dispatch, and remaining
-   state transitions identified by those comparisons;
-4. evaluate the trusted Uniform construction requirements in
+3. evaluate the trusted Uniform construction requirements in
    docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change;
-5. move additional work into XS only where same-run benchmarks justify it;
-6. define the optional Linux::Event native Stream-consumer bridge without
-   making it part of the portable Unblock API;
-7. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
+4. define the optional Linux::Event adapter/bridge boundary without
+   making Linux-specific behavior part of the portable Unblock API;
+5. move additional work into XS only where new same-run benchmarks justify it;
+6. integrate Linux::Event::HTTP against the public Unblock engine and rerun its
    existing HTTP/1 suite unchanged where practical.
+
+The callback/lifecycle profiling pass is complete and does not justify
+weakening callback exception handling or moving finalization methods into XS.
+
+The trusted Uniform construction requirements are documented in
+   docs/TRUSTED_UNIFORM.md before proposing any cross-distribution API change.
 
 The Linux::Event adapter must remain an optimization and transport binding.
 Protocol correctness must continue to be testable entirely in memory here.
