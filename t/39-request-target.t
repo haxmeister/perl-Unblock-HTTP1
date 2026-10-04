@@ -144,6 +144,12 @@ subtest 'asterisk and basic request-target forms are validated' => sub {
     );
     ok(!$missing_authority->{ok},
         'http absolute-form without authority is rejected on receipt');
+
+    my $empty_http_host = parse(
+        "GET http://:80/path HTTP/1.1\r\nHost: :80\r\n\r\n"
+    );
+    ok(!$empty_http_host->{ok},
+        'http absolute-form with an empty host identifier is rejected');
 };
 
 subtest 'outgoing request target uses the same form rules' => sub {
@@ -191,6 +197,17 @@ subtest 'outgoing request target uses the same form rules' => sub {
         Unblock::HTTP1::_Wire::request_plan($absolute)->{wire},
         qr/\AGET http:\/\/example\.test\/path HTTP\/1\.1\r\n/,
         'absolute-form serializes unchanged',
+    );
+
+    my $absolute_empty_port = Uniform::HTTP::Request->new(
+        method  => 'GET',
+        target  => 'http://example.test:/path',
+        headers => [ [ Host => 'example.test:' ] ],
+    );
+    like(
+        Unblock::HTTP1::_Wire::request_plan($absolute_empty_port)->{wire},
+        qr/\AGET http:\/\/example\.test:\/path HTTP\/1\.1\r\nHost: example\.test:\r\n/,
+        'absolute-form permits an explicit empty port',
     );
 
     my $absolute_no_host = Uniform::HTTP::Request->new(
