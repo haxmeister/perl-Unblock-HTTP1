@@ -550,7 +550,10 @@ sub _simple_request_plan {
         my $value = _bytes('header value', $request->header_value($index));
         my $key = _lc($name);
 
-        ++$host_count if $key eq 'host';
+        if ($key eq 'host') {
+            ++$host_count;
+            _validate_host_value($value);
+        }
 
         # These fields alter framing, persistence, switching, expectation, or
         # request validation. Let the complete planner own those paths.
@@ -569,7 +572,9 @@ sub _simple_request_plan {
         return unless $request->can('authority');
         my $authority = $request->authority;
         return unless defined $authority;
-        $wire .= 'Host: ' . _bytes('request authority', $authority) . "\r\n";
+        $authority = _bytes('request authority', $authority);
+        _validate_host_value($authority);
+        $wire .= 'Host: ' . $authority . "\r\n";
     }
 
     my $mode = 'none';
