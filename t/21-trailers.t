@@ -45,8 +45,21 @@ $client->request(
     on_error => sub { die "client error: $_[1]" },
 );
 
-$server->input($client->output);
-$client->input($server->output);
+my $request_wire = $client->output;
+like(
+    $request_wire,
+    qr/\r\nTrailer: X-Request-End\r\n/,
+    'known request trailer is announced before the body',
+);
+$server->input($request_wire);
+
+my $response_wire = $server->output;
+like(
+    $response_wire,
+    qr/\r\nTrailer: X-Response-End\r\n/,
+    'known response trailer is announced before the body',
+);
+$client->input($response_wire);
 
 is($request_body, 'payload', 'chunked request body decoded');
 is($request_trailer, 'yes', 'request trailer preserved in Uniform request');
