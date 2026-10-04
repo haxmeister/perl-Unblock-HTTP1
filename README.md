@@ -191,12 +191,14 @@ specialized bridge without making the reusable HTTP engine depend on it.
 
 Defaults are finite and configurable per engine:
 
-    maximum HTTP head:     65536 bytes
-    maximum header fields: 100
-    body high water:       65536 bytes
-    body low water:        32768 bytes
+    maximum HTTP head:             65536 bytes
+    maximum header fields:         100
+    maximum chunk extension bytes: 16384 per message
+    body high water:               65536 bytes
+    body low water:                32768 bytes
 
-The native parser has a hard ceiling of 256 header fields per parsed section.
+Set max_chunk_extension_size to 0 to opt out of that extension budget. The
+native parser also has a hard ceiling of 256 header fields per parsed section.
 
 ## Development status
 
