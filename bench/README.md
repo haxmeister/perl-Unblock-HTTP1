@@ -34,7 +34,7 @@ measurements identify as expensive.
 Do not use these numbers as network server requests-per-second claims. There is
 no socket, TLS, DNS, event loop, scheduler, or kernel I/O in these cases.
 
-The useful comparison before Linux::Event integration is:
+The useful standalone comparison is:
 
 1. native request-head parsing;
 2. native response-head parsing;
@@ -47,11 +47,11 @@ The useful comparison before Linux::Event integration is:
 9. client-only and server-only HTTP/1 cycles;
 10. common-path versus full-planner buffered serialization.
 
-The Linux::Event comparison workflow also measures receive-side Uniform object
+The cross-engine comparison benchmark also measures receive-side Uniform object
 materialization. Its trusted-shape cases are diagnostics only: they estimate
 the ceiling of a future sanctioned trusted-construction API and deliberately
 must not be used by production engine code. See docs/TRUSTED_UNIFORM.md.
 
-After the standalone engine is stable, use the cross-engine comparisons and
-profiles to decide which additional serialization or state transitions are
-worth moving into XS.
+Use cross-engine comparisons and profiles only to identify portable engine
+costs. Framework-specific integration decisions belong to the consuming
+project.
