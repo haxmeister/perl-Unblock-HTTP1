@@ -118,6 +118,12 @@ picohttpparser's chunk decoder is configured to stop at the zero chunk before
 it consumes trailer fields. Unblock then parses the trailer section as a real
 HTTP field block and places those fields in the Uniform trailer section.
 
+The vendored decoder carries a small local resource-limit patch. It counts the
+total bytes spent on chunk extensions across a message and rejects the framing
+when max_chunk_extension_size is exceeded. The default is 16384 bytes; zero
+means unlimited. This keeps the extension limit in the native framing path
+instead of adding a second Perl parser.
+
 When outgoing trailer fields are already known when the message head is
 planned, Unblock adds their names to Trailer automatically. If a streaming
 producer will add trailer names only after the head has been sent, the caller
