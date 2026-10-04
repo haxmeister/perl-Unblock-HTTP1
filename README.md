@@ -23,9 +23,9 @@ If the transport reaches EOF, tell the engine explicitly:
 That matters for legal HTTP/1 responses whose body ends when the connection
 closes.
 
-This boundary lets the same HTTP/1 implementation work with Linux::Event,
-IO::Async, AnyEvent, Mojolicious, blocking sockets, in-memory transports, and
-other environments.
+This boundary lets the same HTTP/1 implementation work with different event
+loops, frameworks, blocking sockets, in-memory transports, and other reliable
+ordered byte streams.
 
 ## Message objects
 
@@ -139,8 +139,8 @@ Bytes that followed the HTTP message in the same transport read are preserved:
 
     my $bytes_for_next_protocol = $engine->take_remainder;
 
-This is designed so Linux::Event can keep its live Stream transition behavior
-while other frameworks can hand the same bytes to their own protocol object.
+This lets any transport or framework hand the preserved bytes to the next
+protocol implementation without losing or reparsing them.
 
 ## What Unblock::HTTP1 owns
 
@@ -183,9 +183,10 @@ The distribution vendors picohttpparser and compiles it as an internal XS
 backend. Building and installing Unblock::HTTP1 does not download C source at
 build time.
 
-The XS layer is deliberately transport-neutral. Linux::Event's native Stream
-consumer ABI is not part of Unblock::HTTP1. A Linux::Event adapter can add a
-specialized bridge without making the reusable HTTP engine depend on it.
+The XS layer is deliberately transport-neutral. Transport-specific native
+consumer APIs and event-loop internals are not part of Unblock::HTTP1.
+Specialized adapters can optimize byte movement without changing the portable
+engine.
 
 ## Limits
 
@@ -204,11 +205,12 @@ native parser also has a hard ceiling of 256 header fields per parsed section.
 
 The distribution has not yet been released.
 
-The standalone protocol boundary is now stable enough for integration work.
+The portable engine has completed its planned protocol-completeness,
+cross-platform, security-hardening, and benchmark passes.
+
 Its suite exercises client/server exchanges entirely in memory so the core
-cannot accidentally depend on a particular socket type or event loop.
-Linux::Event::HTTP can integrate through the public byte API without adding
-Linux-specific behavior here.
+cannot accidentally depend on a particular socket type, framework, operating
+system, or event loop.
 
 ## License
 
