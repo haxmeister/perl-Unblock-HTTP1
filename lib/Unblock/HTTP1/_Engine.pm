@@ -7,6 +7,16 @@ use utf8 ();
 
 sub _init_engine {
     my ($self, %option) = @_;
+    my %known = map { $_ => 1 } qw(
+        max_head_size
+        max_headers
+        max_chunk_extension_size
+        high_water
+        low_water
+    );
+    for my $key (sort keys %option) {
+        croak "new(): unknown option '$key'" unless $known{$key};
+    }
     $self->{max_head_size} = exists $option{max_head_size} ? $option{max_head_size} : 65_536;
     $self->{max_headers} = exists $option{max_headers} ? $option{max_headers} : 100;
     $self->{max_chunk_extension_size} = exists $option{max_chunk_extension_size}
