@@ -50,6 +50,8 @@ subtest 'ordinary buffered request uses correct HTTP/1.1 framing' => sub {
 sub server_events {
     my (@part) = @_;
     my @event;
+    my $body = '';
+    my @body_complete;
 
     my $server = Unblock::HTTP1::Server->new(
         on_request => sub {
@@ -61,10 +63,8 @@ sub server_events {
         },
         on_body => sub {
             my ($tx, $request, $bytes) = @_;
-            push @event, [
-                body => $bytes,
-                $request->is_complete ? 1 : 0,
-            ];
+            $body .= $bytes;
+            push @body_complete, $request->is_complete ? 1 : 0;
         },
         on_request_end => sub {
             my ($tx, $request) = @_;
@@ -79,7 +79,7 @@ sub server_events {
     );
 
     $server->input($_) for @part;
-    return (\@event, $server->output);
+    return (\@event, $body, \@body_complete, $server->output);
 }
 
 subtest 'coalesced fixed request matches fragmented request lifecycle' => sub {
@@ -89,23 +89,30 @@ subtest 'coalesced fixed request matches fragmented request lifecycle' => sub {
         "Content-Length: 3\r\n" .
         "\r\n";
 
-    my ($coalesced, $coalesced_wire) = server_events($head . 'abc');
-    my ($fragmented, $fragmented_wire) = server_events($head . 'a', 'bc');
+    my ($coalesced, $coalesced_body, $coalesced_body_state, $coalesced_wire)
+        = server_events($head . 'abc');
+    my ($fragmented, $fragmented_body, $fragmented_body_state, $fragmented_wire)
+        = server_events($head . 'a', 'bc');
 
     is_deeply(
         $coalesced,
         [
             [ request => 0, 0 ],
-            [ body => 'abc', 0 ],
             [ end => 1, 0 ],
         ],
-        'coalesced fixed request preserves callback lifecycle',
+        'coalesced fixed request preserves request/end lifecycle',
     );
     is_deeply(
         $fragmented,
         $coalesced,
-        'fragmented fixed request exposes the same callback lifecycle',
+        'fragmented fixed request preserves the same request/end lifecycle',
     );
+    is($coalesced_body, 'abc', 'coalesced request body bytes are exact');
+    is($fragmented_body, 'abc', 'fragmented request body bytes are exact');
+    ok(!grep { $_ } @$coalesced_body_state,
+        'coalesced body callbacks observe an incomplete request');
+    ok(!grep { $_ } @$fragmented_body_state,
+        'fragmented body callbacks observe an incomplete request');
     is($fragmented_wire, $coalesced_wire,
         'coalesced and fragmented requests produce identical response wire');
 };
@@ -113,6 +120,8 @@ subtest 'coalesced fixed request matches fragmented request lifecycle' => sub {
 sub client_events {
     my (@part) = @_;
     my @event;
+    my $body = '';
+    my @body_complete;
 
     my $client = Unblock::HTTP1::Client->new;
     my $tx = $client->request(
@@ -130,10 +139,8 @@ sub client_events {
         },
         on_body => sub {
             my ($tx, $response, $bytes) = @_;
-            push @event, [
-                body => $bytes,
-                $response->is_complete ? 1 : 0,
-            ];
+            $body .= $bytes;
+            push @body_complete, $response->is_complete ? 1 : 0;
         },
         on_complete => sub {
             my ($tx) = @_;
@@ -147,7 +154,7 @@ sub client_events {
     $client->output;
 
     $client->input($_) for @part;
-    return (\@event, $tx);
+    return (\@event, $body, \@body_complete, $tx);
 }
 
 subtest 'coalesced fixed response matches fragmented response lifecycle' => sub {
@@ -156,23 +163,30 @@ subtest 'coalesced fixed response matches fragmented response lifecycle' => sub 
         "Content-Length: 3\r\n" .
         "\r\n";
 
-    my ($coalesced, $coalesced_tx) = client_events($head . 'abc');
-    my ($fragmented, $fragmented_tx) = client_events($head . 'a', 'bc');
+    my ($coalesced, $coalesced_body, $coalesced_body_state, $coalesced_tx)
+        = client_events($head . 'abc');
+    my ($fragmented, $fragmented_body, $fragmented_body_state, $fragmented_tx)
+        = client_events($head . 'a', 'bc');
 
     is_deeply(
         $coalesced,
         [
             [ response => 0, 0 ],
-            [ body => 'abc', 0 ],
             [ complete => 1, 0 ],
         ],
-        'coalesced fixed response preserves callback lifecycle',
+        'coalesced fixed response preserves response/completion lifecycle',
     );
     is_deeply(
         $fragmented,
         $coalesced,
-        'fragmented fixed response exposes the same callback lifecycle',
+        'fragmented fixed response preserves the same response/completion lifecycle',
     );
+    is($coalesced_body, 'abc', 'coalesced response body bytes are exact');
+    is($fragmented_body, 'abc', 'fragmented response body bytes are exact');
+    ok(!grep { $_ } @$coalesced_body_state,
+        'coalesced body callbacks observe an incomplete response');
+    ok(!grep { $_ } @$fragmented_body_state,
+        'fragmented body callbacks observe an incomplete response');
     ok($coalesced_tx->is_complete, 'coalesced response transaction completes');
     ok($fragmented_tx->is_complete, 'fragmented response transaction completes');
 };
