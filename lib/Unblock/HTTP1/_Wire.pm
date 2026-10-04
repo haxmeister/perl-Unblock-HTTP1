@@ -432,6 +432,30 @@ sub _absolute_form_host {
     return (1, $authority);
 }
 
+sub _received_request_metadata {
+    my ($method, $target) = @_;
+    $method = _method($method);
+    $target = _bytes('request target', $target);
+
+    if ($method eq 'CONNECT') {
+        return (authority => $target);
+    }
+
+    return () if substr($target, 0, 1) eq '/' || $target eq '*';
+
+    return () unless $target =~ /\A([A-Za-z][A-Za-z0-9+.-]*):(.*)\z/s;
+    my ($scheme, $rest) = ($1, $2);
+    my @metadata = (scheme => $scheme);
+
+    if (substr($rest, 0, 2) eq '//') {
+        my $authority = substr($rest, 2);
+        $authority =~ s{[/?].*\z}{}s;
+        push @metadata, authority => $authority if length $authority;
+    }
+
+    return @metadata;
+}
+
 sub _upgrade_tokens {
     my ($where, $fields) = @_;
     my @token;
