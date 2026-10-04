@@ -7,6 +7,8 @@ use Config;
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 use Unblock::HTTP1;
+use Unblock::HTTP1::Transaction;
+use Unblock::HTTP1::_Native;
 use Unblock::HTTP1::_Wire;
 
 my $seconds = @ARGV ? shift @ARGV : 2;
@@ -31,6 +33,25 @@ my $response = Uniform::HTTP::Response->new(
 
 my $request_fields = Unblock::HTTP1::_Wire::_fields($request, 'header');
 my $response_fields = Unblock::HTTP1::_Wire::_fields($response, 'header');
+
+my $request_wire =
+    "GET /hello?x=1 HTTP/1.1\r\n" .
+    "Host: example.test\r\n" .
+    "User-Agent: Unblock-Benchmark\r\n" .
+    "Accept: */*\r\n" .
+    "\r\n";
+my $response_wire =
+    "HTTP/1.1 200 OK\r\n" .
+    "Content-Type: text/plain\r\n" .
+    "Content-Length: 5\r\n" .
+    "\r\n";
+
+my $request_head = Unblock::HTTP1::_Native->parse_request_head($request_wire);
+my $response_head = Unblock::HTTP1::_Native->parse_response_head($response_wire);
+die "request parse setup failed" unless $request_head && $request_head->{ok};
+die "response parse setup failed" unless $response_head && $response_head->{ok};
+
+my $transaction_owner = bless {}, 'Unblock::HTTP1::Benchmark::Owner';
 
 print "Unblock::HTTP1 $Unblock::HTTP1::VERSION serialization diagnostic\n";
 print "Perl $] ($Config{archname})\n";
@@ -100,6 +121,33 @@ cmpthese(
                 body => 'hello',
             );
             die unless $value->status == 200;
+        },
+        request_receive_new => sub {
+            my $value = Uniform::HTTP::Request->new(
+                method  => $request_head->{method},
+                target  => $request_head->{target},
+                version => $request_head->{version},
+                headers => $request_head->{headers},
+            );
+            $value->mark_incomplete->freeze_initial;
+            die unless $value->method eq 'GET';
+        },
+        response_receive_new => sub {
+            my $value = Uniform::HTTP::Response->new(
+                status  => $response_head->{status},
+                reason  => $response_head->{reason},
+                version => $response_head->{version},
+                headers => $response_head->{headers},
+            );
+            $value->mark_incomplete->freeze_initial;
+            die unless $value->status == 200;
+        },
+        transaction_new => sub {
+            my $value = Unblock::HTTP1::Transaction->_new(
+                $transaction_owner,
+                $request,
+            );
+            die unless $value->request == $request;
         },
     },
 );
