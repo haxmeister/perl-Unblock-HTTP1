@@ -267,6 +267,147 @@ sub _version {
     return $version;
 }
 
+sub _simple_request_plan {
+    my ($request, $stream_body) = @_;
+    return if $stream_body;
+
+    my $version = $request->version;
+    $version = '1.1' unless defined $version;
+    return unless $version eq '1.1';
+
+    my $method = _bytes('request method', $request->method);
+    return if uc($method) eq 'CONNECT';
+
+    if ($request->can('protocol')) {
+        return if defined $request->protocol;
+    }
+
+    return if $request->has_buffered_body;
+
+    my $trailer_count = $request->trailer_count;
+    return unless defined($trailer_count) && $trailer_count == 0;
+
+    my $target = _bytes('request target', $request->target);
+    my $count = $request->header_count;
+    return unless defined $count;
+
+    my $wire = $method . ' ' . $target . " HTTP/1.1\r\n";
+    my $host_count = 0;
+
+    for my $index (0 .. $count - 1) {
+        my $name = _bytes('header name', $request->header_name($index));
+        my $value = _bytes('header value', $request->header_value($index));
+        my $key = _lc($name);
+
+        ++$host_count if $key eq 'host';
+
+        # These fields alter framing, persistence, switching, expectation, or
+        # request validation. Let the complete planner own those paths.
+        return if $key eq 'content-length'
+            || $key eq 'transfer-encoding'
+            || $key eq 'connection'
+            || $key eq 'upgrade'
+            || $key eq 'expect';
+
+        $wire .= $name . ': ' . $value . "\r\n";
+    }
+
+    return if $host_count > 1;
+
+    if (!$host_count) {
+        return unless $request->can('authority');
+        my $authority = $request->authority;
+        return unless defined $authority;
+        $wire .= 'Host: ' . _bytes('request authority', $authority) . "\r\n";
+    }
+
+    $wire .= "\r\n";
+
+    return {
+        wire           => $wire,
+        version        => '1.1',
+        mode           => 'none',
+        remaining      => undef,
+        stream_body    => 0,
+        trailers       => [],
+        keep_alive     => 1,
+        body_finalized => 1,
+    };
+}
+
+sub _simple_response_plan {
+    my ($request, $response, $stream_body) = @_;
+    return if $stream_body;
+
+    my $request_version = $request->version;
+    $request_version = '1.1' unless defined $request_version;
+    return unless $request_version eq '1.1';
+
+    my $method = _bytes('request method', $request->method);
+    return if uc($method) eq 'HEAD' || uc($method) eq 'CONNECT';
+
+    # Any explicit connection option can change persistence semantics.
+    my $request_connection = $request->header_values('Connection');
+    return unless defined($request_connection) && !@$request_connection;
+
+    my $response_version = $response->version;
+    return if defined($response_version) && $response_version ne '1.1';
+
+    my $status = $response->status;
+    return if $status < 200 || $status > 599
+        || $status == 204 || $status == 205 || $status == 304;
+
+    my $trailer_count = $response->trailer_count;
+    return unless defined($trailer_count) && $trailer_count == 0;
+
+    my $body;
+    if ($response->has_buffered_body) {
+        $body = _bytes('response body', $response->body);
+    } else {
+        $body = '';
+    }
+
+    my $reason_value = $response->reason;
+    my $reason = defined($reason_value)
+        ? _bytes('response reason', $reason_value)
+        : ($REASON{$status} || '');
+
+    my $count = $response->header_count;
+    return unless defined $count;
+
+    my $wire = 'HTTP/1.1 ' . sprintf('%03d', $status)
+        . ' ' . $reason . "\r\n";
+
+    for my $index (0 .. $count - 1) {
+        my $name = _bytes('header name', $response->header_name($index));
+        my $value = _bytes('header value', $response->header_value($index));
+        my $key = _lc($name);
+
+        # Explicit framing or persistence belongs to the complete planner.
+        return if $key eq 'content-length'
+            || $key eq 'transfer-encoding'
+            || $key eq 'connection';
+
+        $wire .= $name . ': ' . $value . "\r\n";
+    }
+
+    my $length = length($body);
+    $wire .= 'Content-Length: ' . $length . "\r\n\r\n" . $body;
+
+    return {
+        wire           => $wire,
+        version        => '1.1',
+        mode           => 'content-length',
+        remaining      => 0,
+        stream_body    => 0,
+        trailers       => [],
+        keep_alive     => 1,
+        close_after    => 0,
+        switch         => 0,
+        body_finalized => 1,
+    };
+}
+
 sub request_plan {
     my ($request, %option) = @_;
     croak 'request does not implement the Uniform HTTP request contract'
@@ -276,6 +417,10 @@ sub request_plan {
         if $request->can('protocol') && defined $request->protocol;
 
     my $stream_body = $option{stream_body} ? 1 : 0;
+    if (my $simple = _simple_request_plan($request, $stream_body)) {
+        return $simple;
+    }
+
     my $version = _version($request, '1.1');
     my $method = _bytes('request method', $request->method);
     my $target = _bytes('request target', $request->target);
@@ -457,6 +602,10 @@ sub response_plan {
             && $response->can('header_count') && $response->can('has_buffered_body');
 
     my $stream_body = $option{stream_body} ? 1 : 0;
+    if (my $simple = _simple_response_plan($request, $response, $stream_body)) {
+        return $simple;
+    }
+
     my $request_version = $request->version || '1.1';
     croak 'request version is not HTTP/1.0 or HTTP/1.1'
         unless $request_version eq '1.0' || $request_version eq '1.1';
