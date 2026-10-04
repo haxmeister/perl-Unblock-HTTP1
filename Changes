@@ -1,5 +1,15 @@
 Revision history for Unblock-HTTP1
 
+0.03  Not yet released
+    - Add a versioned, transport-neutral borrowed native input ABI for XS
+      transports while preserving the ordinary input() interface.
+    - Use the Uniform::HTTP 0.06 native FastPath header to construct canonical
+      requests directly from validated parser byte spans.
+    - Report exact consumed prefixes so incomplete heads and post-switch bytes
+      remain owned by the host transport.
+    - Keep protocol parsing and lifecycle state in Unblock rather than
+      duplicating HTTP/1 logic in event-framework adapters.
+
 0.02  2026-10-04
     - Use the Uniform::HTTP 0.05 FastPath ABI for trusted receive
       construction and canonical request/response serialization.
