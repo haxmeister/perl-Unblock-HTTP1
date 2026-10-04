@@ -85,4 +85,63 @@ subtest 'extra bytes after an otherwise complete response close reuse' => sub {
     ok($client->is_closed, 'connection is not reusable with extra received bytes');
 };
 
+
+subtest 'idle unsolicited response bytes close the connection' => sub {
+    my @event;
+    my $client = Unblock::HTTP1::Client->new;
+    my $tx = $client->request(
+        request('/one'),
+        on_complete => sub { push @event, 'complete' },
+        on_error    => sub { push @event, 'error' },
+    );
+    $client->output;
+
+    $client->input(
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+    );
+
+    ok($tx->is_complete, 'first response completes normally');
+    ok(!$client->is_closed, 'connection is idle and reusable after first response');
+
+    $client->input(
+        "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+    );
+
+    ok($client->is_closed, 'unsolicited idle response closes connection');
+    is_deeply(\@event, [ 'complete' ],
+        'completed transaction is not retroactively failed');
+
+    my $ok = eval {
+        $client->request(request('/two'));
+        1;
+    };
+    ok(!$ok, 'closed poisoned connection cannot accept a later request');
+    like($@, qr/connection is closed/,
+        'later request failure is explicit');
+};
+
+subtest 'idle CRLF keepalive noise can be discarded' => sub {
+    my $client = Unblock::HTTP1::Client->new;
+    my $tx = $client->request(
+        request('/one'),
+        on_error => sub { die "unexpected first request error: $_[1]" },
+    );
+    $client->output;
+    $client->input(
+        "HTTP/1.1 204 No Content\r\n\r\n"
+    );
+
+    ok($tx->is_complete, 'first transaction completes');
+    $client->input("\r\n\r\n");
+    ok(!$client->is_closed, 'CRLF-only idle bytes are discarded');
+
+    my $second = $client->request(
+        request('/two'),
+        on_error => sub { die "unexpected second request error: $_[1]" },
+    );
+    like($client->output, qr/\AGET \/two HTTP\/1\.1\r\n/,
+        'connection remains usable after idle CRLF discard');
+    ok(!$second->is_terminal, 'second transaction remains active');
+};
+
 done_testing;
