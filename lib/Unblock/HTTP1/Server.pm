@@ -239,6 +239,10 @@ sub _transaction_respond {
     croak 'respond(): Transaction is not active on this HTTP/1 connection'
         unless $self->{active} && $self->{active} == $tx;
     croak 'respond(): Transaction already has a Response' if $tx->response;
+    my $status = Unblock::HTTP1::_Wire::_status_code($response->status);
+    croak 'respond(): informational status must use send_informational()'
+        if $status < 200 && $status != 101;
+
     my $stream_body = delete($option{stream_body}) ? 1 : 0;
     my $on_drain = delete $option{on_drain};
     croak 'respond(): on_drain must be a coderef'
