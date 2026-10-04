@@ -1066,9 +1066,6 @@ ub_http1_input_borrowed(
             SV **ok_sv = hv_fetch(head_hv, "ok", 2, 0);
 
             if (ok_sv != NULL && SvTRUE(*ok_sv)) {
-                request = ub_http1_uniform_request_from_head(
-                    aTHX_ context, head
-                );
                 SV **consumed_sv = hv_fetch(head_hv, "consumed", 8, 0);
                 if (consumed_sv != NULL && SvOK(*consumed_sv)) {
                     UV head_consumed = SvUV(*consumed_sv);
