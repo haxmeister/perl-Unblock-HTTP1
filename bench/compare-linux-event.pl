@@ -5,6 +5,7 @@ use Benchmark qw(cmpthese);
 use Config;
 
 use Uniform::HTTP::Request;
+use Uniform::HTTP::Response;
 use Unblock::HTTP1;
 use Unblock::HTTP1::_Native;
 
@@ -28,6 +29,17 @@ my $wire =
 my $head = Unblock::HTTP1::_Native->parse_request_head($wire, 0, 100);
 die "Unblock setup parse failed\n" unless $head && $head->{ok};
 
+my $response_wire =
+    "HTTP/1.1 200 OK\r\n" .
+    "Content-Type: text/plain\r\n" .
+    "Content-Length: 5\r\n" .
+    "\r\n";
+my $response_head = Unblock::HTTP1::_Native->parse_response_head(
+    $response_wire, 0, 100,
+);
+die "Unblock response setup parse failed\n"
+    unless $response_head && $response_head->{ok};
+
 sub trusted_uniform_request {
     my ($parsed) = @_;
     return bless {
@@ -46,6 +58,23 @@ sub trusted_uniform_request {
         authority         => undef,
         protocol          => undef,
     }, 'Uniform::HTTP::Request';
+}
+
+sub trusted_uniform_response {
+    my ($parsed) = @_;
+    return bless {
+        version           => $parsed->{version},
+        headers           => $parsed->{headers},
+        trailers          => [],
+        initial_frozen    => 1,
+        trailers_frozen   => 1,
+        body              => undef,
+        has_buffered_body => 0,
+        complete          => 0,
+        mutable           => 0,
+        status            => $parsed->{status},
+        reason            => $parsed->{reason},
+    }, 'Uniform::HTTP::Response';
 }
 
 print "HTTP/1 receive-path comparison\n";
@@ -122,6 +151,45 @@ cmpthese(
                 unless $request->method eq 'GET'
                     && $request->target eq '/api/resource?x=1'
                     && ($request->header('Host') || '') eq 'example.test';
+        },
+        unblock_public_response => sub {
+            my $parsed = Unblock::HTTP1::_Native->parse_response_head(
+                $response_wire, 0, 100,
+            );
+            die "Unblock response parse failure"
+                unless $parsed && $parsed->{ok};
+            my $response = Uniform::HTTP::Response->new(
+                status  => $parsed->{status},
+                reason  => $parsed->{reason},
+                version => $parsed->{version},
+                headers => $parsed->{headers},
+            );
+            $response->mark_incomplete->freeze_initial;
+            die "Unblock response object failure"
+                unless $response->status == 200
+                    && ($response->header('Content-Type') || '') eq 'text/plain';
+        },
+        unblock_response_from_head => sub {
+            my $response = Uniform::HTTP::Response->new(
+                status  => $response_head->{status},
+                reason  => $response_head->{reason},
+                version => $response_head->{version},
+                headers => $response_head->{headers},
+            );
+            $response->mark_incomplete->freeze_initial;
+            die "Unblock response construction failure"
+                unless $response->status == 200;
+        },
+        unblock_trusted_response => sub {
+            my $parsed = Unblock::HTTP1::_Native->parse_response_head(
+                $response_wire, 0, 100,
+            );
+            die "Unblock response parse failure"
+                unless $parsed && $parsed->{ok};
+            my $response = trusted_uniform_response($parsed);
+            die "trusted response access failure"
+                unless $response->status == 200
+                    && ($response->header('Content-Type') || '') eq 'text/plain';
         },
         linux_native_request => sub {
             my $request = Linux::Event::HTTP::_HTTP1->parse_request(
