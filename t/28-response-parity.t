@@ -158,7 +158,10 @@ subtest 'server HEAD body is metadata only' => sub {
         },
     );
     $server->input(
-        "HEAD / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n"
+        "HEAD / HTTP/1.1\r\n" .
+        "Host: example.test\r\n" .
+        "Connection: close, TE\r\n" .
+        "TE: gzip\r\n\r\n"
     );
     is(
         $server->output,
@@ -198,7 +201,10 @@ subtest 'server 304 permits transfer-coding metadata' => sub {
         },
     );
     $server->input(
-        "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n"
+        "GET / HTTP/1.1\r\n" .
+        "Host: example.test\r\n" .
+        "Connection: close, TE\r\n" .
+        "TE: gzip\r\n\r\n"
     );
     is(
         $server->output,
