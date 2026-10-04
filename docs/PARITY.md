@@ -29,7 +29,10 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Numerically equivalent Content-Length spellings are normalized consistently.
 - Transfer-Encoding plus Content-Length rejection.
 - Strict request chunked-coding rules.
-- HTTP/1.0 Transfer-Encoding rejection.
+- HTTP/1.0 Transfer-Encoding and TE sender rejection.
+- Outgoing TE syntax, qvalue, Connection: TE, and implicit-chunked rules.
+- Server response transfer codings are limited to positive TE negotiation from
+  the request; chunked remains implicitly acceptable.
 - Response framing with preceding transfer codings and non-chunked final
   transfer codings on both receive and send paths.
 - Final chunked framing is removed on receive and added on send while earlier
@@ -48,6 +51,7 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Empty streaming writes do not emit a terminating chunk.
 - Trailer fields remain separate from initial headers.
 - Ordered trailer fields are stored in Uniform::HTTP.
+- Known outgoing trailer names are announced automatically with Trailer.
 - Framing fields are rejected from trailer sections.
 - Close-delimited client response bodies complete only at transport EOF.
 - Truncated fixed and chunked responses fail at EOF.
