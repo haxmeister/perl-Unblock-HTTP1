@@ -49,6 +49,7 @@ t/42-content-length.t
 t/43-version-compat.t
 t/44-serialization-security.t
 t/45-connection-options.t
+t/46-te-negotiation.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
