@@ -61,6 +61,20 @@ my $fixed_response = Uniform::HTTP::Response->new(
     body   => $body,
 );
 
+my $fixed_request_explicit = Uniform::HTTP::Request->new(
+    method    => 'POST',
+    target    => '/fixed',
+    authority => 'example.test',
+    headers   => [ [ 'Content-Length' => $body_size ] ],
+    body      => $body,
+);
+
+my $fixed_response_explicit = Uniform::HTTP::Response->new(
+    status  => 200,
+    headers => [ [ 'Content-Length' => $body_size ] ],
+    body    => $body,
+);
+
 my $stream_request = Uniform::HTTP::Request->new(
     method    => 'POST',
     target    => '/chunked',
@@ -154,6 +168,23 @@ cmpthese(
                 $fixed_response,
             );
             die "fixed response serialize failure"
+                unless length($plan->{wire}) > $body_size
+                    && $plan->{mode} eq 'content-length';
+        },
+        serialize_request_4k_full => sub {
+            my $plan = Unblock::HTTP1::_Wire::request_plan(
+                $fixed_request_explicit,
+            );
+            die "full fixed request serialize failure"
+                unless length($plan->{wire}) > $body_size
+                    && $plan->{mode} eq 'content-length';
+        },
+        serialize_response_4k_full => sub {
+            my $plan = Unblock::HTTP1::_Wire::response_plan(
+                $fixed_request,
+                $fixed_response_explicit,
+            );
+            die "full fixed response serialize failure"
                 unless length($plan->{wire}) > $body_size
                     && $plan->{mode} eq 'content-length';
         },
