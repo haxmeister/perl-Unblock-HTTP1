@@ -579,7 +579,8 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
                 body_mode = UB_BODY_CHUNKED;
             }
         } else if (!error && has_cl) {
-            body_mode = UB_BODY_CONTENT_LENGTH;
+            body_mode = (is_connect && content_length == 0)
+                ? UB_BODY_NONE : UB_BODY_CONTENT_LENGTH;
         }
         if (error) {
             RETVAL = new_error_result(aTHX_ error_status, error);
