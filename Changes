@@ -1,5 +1,12 @@
 Revision history for Unblock-HTTP1
 
+0.02
+    - Use the Uniform::HTTP 0.05 FastPath ABI for trusted receive
+      construction and canonical request/response serialization.
+    - Adopt parser-produced header storage without repeating Uniform field
+      validation or deep-copying headers.
+    - Preserve the portable Uniform contract for subclasses and adapters.
+
 0.01  2026-10-04
     - First release.
     - Portable HTTP/1.0 and HTTP/1.1 client/server protocol engine.
