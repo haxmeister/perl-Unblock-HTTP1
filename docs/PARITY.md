@@ -10,7 +10,9 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 
 ### Parsing and framing
 
-- HTTP/1.0 and HTTP/1.1 request and response heads.
+- HTTP/1.0 and HTTP/1.1 request and response semantics.
+- Higher HTTP/1 minor versions preserve their received version while using
+  HTTP/1.1 semantics.
 - Case-sensitive HTTP method semantics.
 - Exact request-target bytes.
 - Origin-form, absolute-form, CONNECT authority-form, and OPTIONS asterisk-form
@@ -27,6 +29,8 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - HTTP/1.0 Transfer-Encoding rejection.
 - Response framing with preceding transfer codings and non-chunked final
   transfer codings.
+- Final chunked framing is removed while earlier transfer-coded body bytes
+  remain opaque to the engine.
 - Obsolete folded request fields rejected.
 - HTTP/1.1 Host requirements and persistence rules.
 - HTTP/1.0 keep-alive rules.
@@ -57,8 +61,10 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - 205 cannot contain content but uses normal HTTP/1 zero-content framing.
 - Informational responses are separate Uniform response objects.
 - Invalid informational framing is rejected before application delivery.
-- Expect: 100-continue is emitted before request-body delivery.
-- Unsupported Expect values receive 417 before application dispatch.
+- Expect: 100-continue is emitted before HTTP/1.1 request-body delivery.
+- Unsupported HTTP/1.1 Expect values receive 417 before application dispatch.
+- HTTP/1.0 expectations are ignored and HTTP/1.0 clients never receive 1xx.
+- Non-101 informational responses must use the dedicated informational API.
 
 ### Connection semantics
 
@@ -83,7 +89,8 @@ socket, TLS, event-loop, and live-object transition code does not belong here.
 - Upgrade request and response body/framing restrictions.
 - CONNECT authority-form target validation.
 - CONNECT Host must identify the authority target host; its port may be omitted.
-- CONNECT request body/framing restrictions.
+- CONNECT request body/framing restrictions, while tolerating an explicit
+  Content-Length of zero.
 - Successful CONNECT response restrictions on the server.
 - A client ignores Content-Length and Transfer-Encoding received on a
   successful CONNECT response as required by HTTP/1.
