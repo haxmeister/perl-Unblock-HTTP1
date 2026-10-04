@@ -532,8 +532,15 @@ parse_request_head(CLASS, buffer, last_len = 0, max_headers = 100)
                 parse_connection(value, value_len, &close_seen, &keep_seen);
             } else if (ascii_equal_ci(name, name_len, "Expect", 6)) {
                 int e = parse_expect(value, value_len);
-                if (minor != 1 || e < 0) expect_mode = -1;
-                else if (expect_mode >= 0) expect_mode = 1;
+                if (minor == 0) {
+                    /* HTTP/1.0 did not define expectations. In particular,
+                     * a received 100-continue expectation must be ignored. */
+                    expect_mode = 0;
+                } else if (e < 0) {
+                    expect_mode = -1;
+                } else if (expect_mode >= 0) {
+                    expect_mode = 1;
+                }
             }
         }
         if (!error && host_count > 1) {
