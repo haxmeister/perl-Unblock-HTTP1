@@ -64,7 +64,9 @@ Linux::Event transport bridge belongs in Linux::Event::HTTP.
 
 The parser enforces security-sensitive rules before application delivery:
 
-- only HTTP/1.0 and HTTP/1.1 are accepted;
+- HTTP/1.0 and HTTP/1.1 semantics are implemented;
+- higher HTTP/1 minor versions retain their wire version but use HTTP/1.1
+  semantics for interoperability;
 - obsolete folded fields are rejected;
 - HTTP/1.1 has exactly one Host field;
 - conflicting Content-Length values are rejected;
@@ -82,8 +84,13 @@ The client determines the response body boundary from both the request method
 and response metadata.
 
 No response body is consumed for HEAD, informational responses, 204, 205, 304,
-101, or successful CONNECT. Other final responses use supported
-Transfer-Encoding, then Content-Length, then connection close.
+101, or successful CONNECT. Other final responses use Transfer-Encoding, then Content-Length, then
+connection close.
+
+When a response Transfer-Encoding ends in C<chunked>, Unblock removes that
+outer chunk framing. Earlier transfer codings remain encoded in the body bytes.
+When the final transfer coding is not chunked, EOF delimits the message.
+Unblock does not automatically decode transfer codings such as gzip.
 
 Transfer-Encoding plus Content-Length is rejected as ambiguous. input_eof()
 completes only a close-delimited body.
