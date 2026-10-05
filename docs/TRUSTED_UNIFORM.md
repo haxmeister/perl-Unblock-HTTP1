@@ -2,7 +2,7 @@
 
 Unblock::HTTP1 uses Uniform::HTTP as its public request and response model.
 
-Uniform::HTTP 0.05 provides the sanctioned FastPath ABI that Unblock needs for
+Uniform::HTTP 0.06 provides the sanctioned native FastPath ABI that Unblock needs for
 performance-sensitive protocol work. Unblock uses it in two places:
 
 - constructing canonical Uniform request and response objects from HTTP/1 data
