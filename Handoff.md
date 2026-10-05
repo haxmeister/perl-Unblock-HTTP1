@@ -2,77 +2,88 @@
 
 Repository: haxmeister/perl-Unblock-HTTP1
 
-## Current release prep
+## Current work
 
-Version 0.03 is prepared on top of the transport-neutral native receive work.
+Branch: `api-harmonization-0.10`
 
-The native input ABI is optional. The ordinary `input($bytes)` API remains
-the portable correctness path.
+Version 0.10 harmonizes the public HTTP/1 API vocabulary with the current
+Unblock::HTTP2 and Unblock::HTTP3 conventions.
 
-Native XS transports can pass borrowed contiguous input windows through
-`Unblock::HTTP1::NativeABI`. The caller retains ownership and receives the
-permanently consumed prefix.
+The change is intentionally clean. No compatibility aliases are being added.
 
-## Uniform::HTTP
+## Transaction API
 
-Version 0.03 requires Uniform::HTTP 0.06.
+HTTP/1 already had the common application methods:
 
-Unblock compiles Uniform's header-only native FastPath as part of its own XS.
-Uniform::HTTP itself remains pure Perl.
+- `respond()`
+- `write()`
+- `end()`
+- `send_informational()`
 
-Validated picohttpparser spans are used to construct exact canonical
-Uniform::HTTP objects directly:
+Version 0.10 adds `Transaction->error()`.
 
-- server receive constructs Uniform::HTTP::Request
-- client receive constructs Uniform::HTTP::Response
-- informational responses use the same native construction path
-- portable parsing and construction remain available as fallback behavior
+The common lifecycle vocabulary is now:
 
-The final Uniform object owns copied Perl storage. No borrowed transport or
-parser pointer is retained.
+- `state()`
+- `error()`
+- `is_complete()`
+- `is_cancelled()`
+- `is_error()`
+- `is_terminal()`
 
-## Native ABI behavior
+Cancellation remains distinct from failure and does not manufacture an error
+string.
 
-ABI version: 1
+## Native ABI
 
-Result codes:
+The optional native ABI remains borrowed-input focused. The ordinary
+`input($bytes)` API remains the portable correctness path.
+
+Native discovery is now parallel with HTTP/2:
+
+- `definition()`
+- `native_include_dir()`
+- `header_path()`
+- `c_header()`
+
+`definition()` reports the provider, ABI version, structure size, and
+operations address.
+
+The public header is:
+
+`Unblock/HTTP1/NativeABI/unblock_http1_native_abi.h`
+
+HTTP1.xs compiles against that same header. The former duplicate C ABI
+declaration has been removed.
+
+ABI version remains 1. The layout and result codes are unchanged:
 
 - 0: input accepted
 - 1: more contiguous bytes required
 - 3: HTTP connection closed
 - 4: protocol switched
 
-Incomplete request or response heads report zero consumed bytes so the host can
-retain the prefix and append more data.
+HTTP/1 does not add HTTP/2 native output operations merely for symmetry.
 
-For 101 and successful CONNECT handoff, only HTTP bytes are consumed. Bytes for
-the next protocol remain owned by the host.
+## Uniform::HTTP
 
-Chunked decoding still copies into writable scratch because picohttpparser's
-chunk decoder mutates its input.
+Version 0.10 requires Uniform::HTTP 0.06.
 
-## Architecture
+Unblock compiles Uniform's native FastPath header as part of its own XS.
+Uniform::HTTP itself remains pure Perl.
 
-Do not move transport-specific behavior into Unblock::HTTP1.
+Validated picohttpparser spans construct exact canonical Uniform::HTTP objects
+directly on the native receive path. Portable construction remains available
+for subclasses and adapters.
 
-The ABI must remain independent of:
+## Validation
 
-- file descriptors
-- epoll or other readiness APIs
-- Linux::Event
-- socket ownership
-- framework stream classes
+Before merging this branch to main:
 
-HTTP parsing, validation, framing, and lifecycle stay in Unblock::HTTP1.
-Adapters only move bytes and translate native ABI results to their transport.
-
-## Release checks
-
-Before releasing 0.03:
-
-- full test matrix must pass on Linux Perl 5.16/current, macOS, and Windows
-- distribution distcheck/disttest must pass
-- standalone native/portable benchmarks must pass
-- Linux::Event comparison diagnostic must pass
-- verify MANIFEST does not include this Handoff.md
-- merge the feature branch to main only after those checks are green
+- verify the complete test suite
+- verify POD syntax
+- verify distcheck and disttest
+- verify the public NativeABI header is installed
+- verify the version-consistency and lifecycle tests
+- verify no stale 0.03 API documentation remains
+- verify MANIFEST does not include Handoff.md
