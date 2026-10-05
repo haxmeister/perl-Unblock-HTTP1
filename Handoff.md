@@ -91,14 +91,21 @@ Completed:
 - current documentation uses Uniform::HTTP 0.06
 - Handoff.md remains outside the CPAN MANIFEST
 
-Remaining release gates:
+GitHub Actions release validation is green on run #358 for main commit
+9e190b186bbdbf10864d97977d2a561ef66955c9.
 
-- run the complete test matrix on Linux Perl 5.16/current, macOS, and Windows
-- run POD checks
-- run distcheck and disttest
-- verify the built distribution contains the public NativeABI header
-- optionally rerun the HTTP1 and Linux::Event comparison diagnostics
+Passed:
 
-The connector-authored push to main did not start a GitHub Actions run. The
-local build environment also cannot reach GitHub and does not have
-Uniform::HTTP installed, so the live build/test gates remain explicitly open.
+- Linux current Perl build and full test suite
+- Linux Perl 5.16 build and full test suite
+- macOS current Perl build and full test suite
+- Windows Strawberry Perl 5.40 build and full test suite
+- POD syntax checks on every platform
+- distcheck on Linux current Perl
+- disttest of the generated distribution tarball on Linux current Perl
+- NativeABI installed-header checks exercised by the full test suite
+
+Optional before release:
+
+- rerun the HTTP1 standalone benchmarks
+- rerun the Linux::Event comparison diagnostic
