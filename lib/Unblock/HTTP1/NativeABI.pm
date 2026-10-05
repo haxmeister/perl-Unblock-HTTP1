@@ -3,6 +3,9 @@ package Unblock::HTTP1::NativeABI;
 use strict;
 use warnings;
 
+use File::Basename qw(dirname);
+use File::Spec ();
+
 use Unblock::HTTP1 ();
 use Unblock::HTTP1::_Native ();
 
@@ -14,51 +17,43 @@ use constant INPUT_MORE    => 1;
 use constant INPUT_CLOSED  => 3;
 use constant INPUT_SWITCH  => 4;
 
-sub c_header {
-    return <<'END_C_HEADER';
-#ifndef UNBLOCK_HTTP1_INPUT_ABI_H
-#define UNBLOCK_HTTP1_INPUT_ABI_H
+my $include_dir = File::Spec->catdir(
+    dirname(__FILE__),
+    'NativeABI',
+);
 
-#include "EXTERN.h"
-#include "perl.h"
-#include <stddef.h>
-#include <stdint.h>
+sub native_include_dir {
+    return $include_dir;
+}
 
-#define UB_HTTP1_INPUT_ABI_VERSION 1U
-
-#define UB_HTTP1_INPUT_OK     0
-#define UB_HTTP1_INPUT_MORE   1
-#define UB_HTTP1_INPUT_CLOSED 3
-#define UB_HTTP1_INPUT_SWITCH 4
-
-typedef struct ub_http1_input_ops_v1_s {
-    uint32_t abi_version;
-    size_t struct_size;
-    const char *name;
-
-    void *(*create)(pTHX_ SV *engine);
-
-    int (*input)(
-        pTHX_
-        void *context,
-        const char *data,
-        size_t length,
-        size_t *consumed
+sub header_path {
+    return File::Spec->catfile(
+        $include_dir,
+        'unblock_http1_native_abi.h',
     );
+}
 
-    int (*eof)(pTHX_ void *context);
+sub c_header {
+    my $path = header_path();
 
-    void (*destroy)(pTHX_ void *context);
-} ub_http1_input_ops_v1;
+    open my $fh, '<', $path
+        or die "could not read $path: $!";
 
-#endif
-END_C_HEADER
+    local $/;
+    my $header = <$fh>;
+
+    close $fh
+        or die "could not close $path: $!";
+
+    return $header;
 }
 
 sub definition {
     return {
-        provider           => \&Unblock::HTTP1::_Native::_borrowed_input_operations_address,
-        abi_version        => ABI_VERSION,
+        provider => \&Unblock::HTTP1::_Native::_borrowed_input_operations_address,
+        abi_version => ABI_VERSION,
+        struct_size =>
+            Unblock::HTTP1::_Native::_borrowed_input_operations_size(),
         operations_address =>
             Unblock::HTTP1::_Native::_borrowed_input_operations_address(),
     };
@@ -70,21 +65,21 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP1::NativeABI - Borrowed native input ABI for Unblock::HTTP1
+Unblock::HTTP1::NativeABI - Native transport ABI for Unblock::HTTP1
 
 =head1 DESCRIPTION
 
-This module exposes the optional native input ABI used by event frameworks and
-other XS transports.
+This module exposes the optional native transport ABI used by XS-backed
+transports and event frameworks.
 
-The ordinary C<input()> API remains the portable interface. Native integrations
-may instead pass a borrowed C buffer directly to the HTTP engine.
+The ordinary C<input()> method remains the portable interface. A native
+integration can instead feed borrowed input buffers directly to the HTTP/1
+engine.
 
-The input buffer remains owned by the caller. Unblock::HTTP1 may inspect it
-only during the input call and never retains the pointer after that call
-returns.
+The ABI works with both C<Unblock::HTTP1::Client> and
+C<Unblock::HTTP1::Server>.
 
-=head1 DEFINITION
+=head1 DISCOVERY
 
     my $definition = Unblock::HTTP1::NativeABI::definition();
 
@@ -92,28 +87,52 @@ The returned hash contains:
 
     provider
     abi_version
+    struct_size
     operations_address
 
 C<provider> keeps the XS provider loaded and can be called again to obtain the
-current operations address. C<abi_version> is currently 1.
+current operations address.
+
+Consumers must check both C<abi_version> and C<struct_size> before
+dereferencing operations.
+
+=head1 HEADER
+
+The installed header is:
+
+    Unblock/HTTP1/NativeABI/unblock_http1_native_abi.h
+
+Its include directory is available through:
+
+    Unblock::HTTP1::NativeABI::native_include_dir()
+
+The complete installed path is available through:
+
+    Unblock::HTTP1::NativeABI::header_path()
+
+C<c_header()> returns the same header text for build systems that prefer to
+generate a private copy.
 
 =head1 C ABI
 
-C<c_header()> returns the ABI version 1 C declaration. Build-time adapters may
-write this text to a generated header rather than carrying a private copy of
-the ABI layout.
+ABI version 1 contains C<create>, C<input>, C<eof>, and C<destroy>.
 
-The operations table contains C<abi_version>, C<struct_size>, C<name>,
-C<create>, C<input>, C<eof>, and C<destroy>. Consumers must check both the ABI
-version and structure size before dereferencing operations.
-
-C<create> receives the Unblock::HTTP1 Client or Server object and returns one
+C<create> receives one Unblock::HTTP1 Client or Server object and returns a
 connection-local native context. Keep that context for the lifetime of the
-HTTP connection instead of creating it for every read.
+HTTP/1 connection.
 
-=head1 INPUT RESULTS
+=head1 BORROWED INPUT
 
-ABI version 1 uses these result codes:
+The native input operation receives:
+
+    const char *data
+    size_t length
+    size_t *consumed
+
+C<data> remains owned by the caller. Unblock::HTTP1 may inspect it only during
+the input call and never retains the pointer after the call returns.
+
+ABI version 1 uses these input result codes:
 
     INPUT_OK       0
     INPUT_MORE     1
@@ -126,25 +145,10 @@ presented again with more contiguous bytes.
 C<INPUT_SWITCH> means HTTP parsing has ended. The unconsumed tail belongs to
 the protocol that takes ownership after HTTP.
 
-=head1 LIFETIME
-
-The native C input operation receives:
-
-    const char *data
-    size_t length
-    size_t *consumed
-
-C<data> is borrowed. It must remain readable until the operation returns.
-Unblock::HTTP1 reports the permanently consumed prefix through C<consumed>.
-
-The host may release or reuse the input storage immediately after the call has
-returned, subject to preserving any unconsumed tail required by C<INPUT_MORE>
-or C<INPUT_SWITCH>.
-
 =head1 FALLBACK
 
 The native ABI is an optimization. A framework that does not use XS, cannot
 consume ABI version 1, or chooses not to use the fast path should continue to
-call C<input()>.
+use C<input()>.
 
 =cut
