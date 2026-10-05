@@ -11,7 +11,26 @@ use Unblock::HTTP1::_Native;
 
 my $definition = Unblock::HTTP1::NativeABI::definition();
 is $definition->{abi_version}, 1, 'borrowed input ABI version is 1';
-ok $definition->{operations_address}, 'borrowed input ABI exposes native operations';
+ok $definition->{struct_size},
+    'borrowed input ABI exposes its structure size';
+ok $definition->{operations_address},
+    'borrowed input ABI exposes native operations';
+
+my $include_dir = Unblock::HTTP1::NativeABI::native_include_dir();
+ok -d $include_dir, 'native ABI exposes an installed include directory';
+my $header_path = Unblock::HTTP1::NativeABI::header_path();
+ok -f $header_path, 'native ABI exposes an installed header path';
+
+my $installed_header = Unblock::HTTP1::NativeABI::c_header();
+like $installed_header,
+    qr/ub_http1_input_ops_v1/,
+    'native ABI publishes its installed C layout';
+my @common_order = map { index($installed_header, $_) }
+    ('void *(*create)', 'int (*input)', 'int (*eof)', 'void (*destroy)');
+ok $common_order[0] < $common_order[1]
+    && $common_order[1] < $common_order[2]
+    && $common_order[2] < $common_order[3],
+    'native input ABI keeps the common create/input/eof/destroy order';
 
 my @events;
 my $native_request;
@@ -301,8 +320,7 @@ for (1 .. 2) {
 }
 is $driver_hits, 2, 'one native ABI context serves repeated requests';
 
-like Unblock::HTTP1::NativeABI::c_header(),
-    qr/ub_http1_input_ops_v1/,
-    'native ABI publishes its C layout';
+is Unblock::HTTP1::NativeABI::c_header(), $installed_header,
+    'c_header returns the installed public header text';
 
 done_testing;
