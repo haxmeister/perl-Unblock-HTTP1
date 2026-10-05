@@ -34,7 +34,7 @@ connection close as its message-body delimiter.
 
 ## Messages
 
-Requests and responses are Uniform::HTTP 0.05 objects.
+Requests and responses are Uniform::HTTP 0.06 objects.
 
 Received request metadata maps directly from method, exact request-target,
 HTTP/1 version, ordered header fields, and ordered trailer fields. Unblock does
@@ -68,6 +68,12 @@ through borrowed contiguous input windows. The host retains ownership of the
 window and Unblock reports the consumed prefix. Parser state and HTTP lifecycle
 remain in this distribution; a framework bridge only moves bytes and maps the
 ABI result to its own read/pause/switch behavior.
+
+Native integrations discover the ABI through definition(),
+native_include_dir(), header_path(), and c_header(). The installed public
+header is the same declaration compiled by the HTTP/1 XS implementation.
+Consumers validate both ABI version and structure size before using the
+operations table.
 
 The native receive path constructs exact canonical Uniform requests and
 responses directly from validated parser byte spans through the Uniform::HTTP
@@ -145,6 +151,9 @@ for choosing fields whose definitions permit trailer use.
 
 A Transaction with stream_body => 1 accepts body chunks through write() and
 finishes with end().
+
+The common transaction lifecycle vocabulary is state(), error(), is_complete(),
+is_cancelled(), is_error(), and is_terminal().
 
 write() accepts the supplied bytes. Its boolean return reports whether the
 engine output queue is below the cooperative high-water mark. When a blocked
