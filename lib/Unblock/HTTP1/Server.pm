@@ -522,6 +522,18 @@ Incoming request bodies are delivered with C<on_body>. C<on_request_end> runs
 after the full request, including trailers, is complete. Informational
 responses can be sent with C<send_informational()> on the Transaction.
 
+=head1 CALLBACKS
+
+C<new()> accepts these callbacks:
+
+    on_request     => sub { my ($transaction, $request) = @_ }
+    on_body        => sub { my ($transaction, $request, $bytes) = @_ }
+    on_request_end => sub { my ($transaction, $request) = @_ }
+    on_error       => sub { my ($transaction, $error) = @_ }
+    on_switch      => sub { my ($transaction, $response) = @_ }
+
+C<on_request> is required.
+
 A 101 response or successful CONNECT switches the engine out of HTTP mode.
 Bytes already read after the HTTP request are preserved by C<take_remainder()>.
 
