@@ -64,10 +64,24 @@ A native adapter should create one ABI context per Client or Server connection
 and keep it for the connection lifetime. It must fall back to C<input()> when
 it cannot consume the advertised ABI version.
 
-Use C<Unblock::HTTP1::NativeABI::c_header()> when an XS adapter needs the
-versioned C structure declaration. The provider remains transport-neutral: it
-does not know about file descriptors, epoll, readiness watchers, or any
-framework-specific stream object.
+Native integrations can discover the installed ABI with:
+
+    my $definition = Unblock::HTTP1::NativeABI::definition();
+    my $include_dir = Unblock::HTTP1::NativeABI::native_include_dir();
+    my $header_path = Unblock::HTTP1::NativeABI::header_path();
+    my $header = Unblock::HTTP1::NativeABI::c_header();
+
+C<definition()> reports the ABI version, structure size, provider, and
+operations address. Consumers must check both the ABI version and structure
+size before dereferencing operations.
+
+The installed public header is:
+
+    Unblock/HTTP1/NativeABI/unblock_http1_native_abi.h
+
+C<c_header()> returns that same installed header text. The provider remains
+transport-neutral: it does not know about file descriptors, epoll, readiness
+watchers, or any framework-specific stream object.
 
 Unblock::HTTP1 itself uses the Uniform::HTTP 0.06 native FastPath internally on
 this route. Validated parser spans are copied directly into the final canonical
