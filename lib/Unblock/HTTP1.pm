@@ -56,6 +56,13 @@ connection pools.
 HTTP messages use L<Uniform::HTTP::Request> and
 L<Uniform::HTTP::Response>.
 
+The application-facing API follows the common Unblock HTTP vocabulary:
+C<Client-E<gt>new>, C<Server-E<gt>new>, C<request()>, C<respond()>,
+C<write()>, C<end()>, and C<send_informational()>.
+
+Transactions expose C<state()>, C<error()>, C<is_complete()>,
+C<is_cancelled()>, C<is_error()>, and C<is_terminal()>.
+
 See L<Unblock::HTTP1::Client>, L<Unblock::HTTP1::Server>, and
 L<Unblock::HTTP1::Transaction>.
 
