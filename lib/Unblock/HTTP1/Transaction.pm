@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(weaken);
 
-our $VERSION = '0.03';
+our $VERSION = '0.10';
 
 sub _new {
     my ($class, $owner, $request, %args) = @_;
@@ -14,6 +14,7 @@ sub _new {
         request     => $request,
         response    => undef,
         state       => 'active',
+        error       => undef,
         callbacks   => $args{callbacks} || {},
         local_done  => $args{local_done} ? 1 : 0,
         remote_done => $args{remote_done} ? 1 : 0,
@@ -27,6 +28,7 @@ sub _new {
 sub request { $_[0]{request} }
 sub response { $_[0]{response} }
 sub state { $_[0]{state} }
+sub error { $_[0]{error} }
 sub is_complete { $_[0]{state} eq 'complete' ? 1 : 0 }
 sub is_cancelled { $_[0]{state} eq 'cancelled' ? 1 : 0 }
 sub is_error { $_[0]{state} eq 'error' ? 1 : 0 }
@@ -98,5 +100,22 @@ incremental body production. It owns no socket and performs no waiting.
 For a client streaming request body, C<write()> and C<end()> produce body
 bytes. For a server streaming response body, they do the same after
 C<respond(..., stream_body =E<gt> 1)>.
+
+A server Transaction can send an informational response with
+C<send_informational()> before the final C<respond()>.
+
+=head1 STATE
+
+The common Unblock HTTP transaction lifecycle vocabulary is:
+
+    state
+    error
+    is_complete
+    is_cancelled
+    is_error
+    is_terminal
+
+C<error()> is undefined unless the Transaction failed. Cancellation is a
+separate terminal state and does not manufacture an error string.
 
 =cut
