@@ -531,6 +531,20 @@ Requests are queued serially. This Client API intentionally does not pipeline
 requests on one connection. Callers that need parallel HTTP/1 work can use
 multiple connections without changing the protocol engine.
 
+=head1 REQUEST CALLBACKS
+
+C<request()> accepts these callbacks:
+
+    on_informational => sub { my ($transaction, $response) = @_ }
+    on_response      => sub { my ($transaction, $response) = @_ }
+    on_body          => sub { my ($transaction, $response, $bytes) = @_ }
+    on_complete      => sub { my ($transaction) = @_ }
+    on_error         => sub { my ($transaction, $error) = @_ }
+    on_switch        => sub { my ($transaction, $response) = @_ }
+    on_drain         => sub { my ($transaction) = @_ }
+
+C<on_drain> is used with C<stream_body =E<gt> 1>.
+
 When a 101 response or successful CONNECT switches away from HTTP, the engine
 stops HTTP parsing. C<take_remainder()> returns bytes that followed the HTTP
 head in the same transport read.
