@@ -1,5 +1,26 @@
 Revision history for Unblock-HTTP1
 
+0.10  2026-10-04
+    - Harmonize the public API vocabulary with Unblock::HTTP2 and
+      Unblock::HTTP3 while keeping HTTP/1-specific behavior natural.
+    - Add Transaction->error() to complete the common lifecycle vocabulary:
+      state(), error(), is_complete(), is_cancelled(), is_error(), and
+      is_terminal().
+    - Normalize NativeABI discovery with definition(), native_include_dir(),
+      header_path(), and c_header().
+    - Report NativeABI struct_size so native consumers can validate both ABI
+      version and structure size before dereferencing operations.
+    - Install a public unblock_http1_native_abi.h header and compile the XS
+      implementation against that same header instead of duplicating the C ABI
+      declaration.
+    - Keep the HTTP/1 native ABI focused on borrowed input rather than adding
+      protocol-irrelevant HTTP/2 output operations for symmetry.
+    - Make the Client, Server, Transaction, callback, streaming, lifecycle, and
+      native-integration documentation intentionally parallel with the other
+      Unblock HTTP engines.
+    - Jump from 0.03 to 0.10 to mark the intentional early API harmonization.
+      No compatibility aliases are provided.
+
 0.03  2026-10-04
     - Add a versioned, transport-neutral borrowed native input ABI for XS
       transports while preserving the ordinary input() interface.
