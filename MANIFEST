@@ -10,12 +10,14 @@ docs/PROTOCOL_STATUS.md
 lib/Unblock/HTTP1.pm
 lib/Unblock/HTTP1/Client.pm
 lib/Unblock/HTTP1/NativeABI.pm
+lib/Unblock/HTTP1/NativeABI/unblock_http1_native_abi.h
 lib/Unblock/HTTP1/Server.pm
 lib/Unblock/HTTP1/Transaction.pm
 lib/Unblock/HTTP1/_Engine.pm
 lib/Unblock/HTTP1/_Native.pm
 lib/Unblock/HTTP1/_Wire.pm
 t/00-load.t
+t/01-version.t
 t/10-native.t
 t/20-memory-loopback.t
 t/21-trailers.t
@@ -46,6 +48,7 @@ t/45-connection-options.t
 t/46-te-negotiation.t
 t/47-uniform-fastpath.t
 t/48-native-borrowed-input.t
+t/49-transaction-lifecycle.t
 vendor/picohttpparser/LICENSE
 vendor/picohttpparser/UPSTREAM
 vendor/picohttpparser/picohttpparser.c
