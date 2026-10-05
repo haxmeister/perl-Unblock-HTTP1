@@ -48,7 +48,7 @@ The useful standalone comparison is:
 10. common-path versus full-planner buffered serialization.
 
 The serialization diagnostic compares canonical Uniform objects using the
-Uniform::HTTP 0.05 FastPath ABI with subclassed objects using the portable
+Uniform::HTTP 0.06 FastPath ABI with subclassed objects using the portable
 method contract. It also compares ordinary Uniform constructor materialization
 with trusted parser construction through the sanctioned FastPath ABI.
 
