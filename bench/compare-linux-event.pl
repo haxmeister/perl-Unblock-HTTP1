@@ -49,7 +49,7 @@ print "approximately $seconds CPU seconds per case\n\n";
 
 print "The public-object cases are the useful cross-engine comparison.\n";
 print "The native cases expose different internal contracts and are diagnostic only.\n";
-print "The Uniform fast-path cases use the sanctioned Uniform::HTTP 0.05 ABI.\n";
+print "The Uniform fast-path cases use the sanctioned Uniform::HTTP 0.06 ABI.\n";
 print "They measure production trusted-parser construction rather than a direct-bless ceiling.\n\n";
 
 cmpthese(
