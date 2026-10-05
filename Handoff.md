@@ -2,18 +2,17 @@
 
 Repository: haxmeister/perl-Unblock-HTTP1
 
-## Current work
+## Release prep
 
-Branch: `api-harmonization-0.10`
+Main is now the 0.10 API-harmonized code.
 
-Version 0.10 harmonizes the public HTTP/1 API vocabulary with the current
-Unblock::HTTP2 and Unblock::HTTP3 conventions.
-
-The change is intentionally clean. No compatibility aliases are being added.
+Version 0.10 aligns the common public HTTP vocabulary with Unblock::HTTP2 and
+Unblock::HTTP3 without adding compatibility aliases or a shared base
+distribution.
 
 ## Transaction API
 
-HTTP/1 already had the common application methods:
+HTTP/1 uses the common application methods:
 
 - `respond()`
 - `write()`
@@ -22,7 +21,7 @@ HTTP/1 already had the common application methods:
 
 Version 0.10 adds `Transaction->error()`.
 
-The common lifecycle vocabulary is now:
+The common lifecycle vocabulary is:
 
 - `state()`
 - `error()`
@@ -39,7 +38,7 @@ string.
 The optional native ABI remains borrowed-input focused. The ordinary
 `input($bytes)` API remains the portable correctness path.
 
-Native discovery is now parallel with HTTP/2:
+Native discovery is parallel with HTTP/2:
 
 - `definition()`
 - `native_include_dir()`
@@ -49,7 +48,7 @@ Native discovery is now parallel with HTTP/2:
 `definition()` reports the provider, ABI version, structure size, and
 operations address.
 
-The public header is:
+The installed public header is:
 
 `Unblock/HTTP1/NativeABI/unblock_http1_native_abi.h`
 
@@ -76,14 +75,30 @@ Validated picohttpparser spans construct exact canonical Uniform::HTTP objects
 directly on the native receive path. Portable construction remains available
 for subclasses and adapters.
 
-## Validation
+## Release audit
 
-Before merging this branch to main:
+Completed:
 
-- verify the complete test suite
-- verify POD syntax
-- verify distcheck and disttest
-- verify the public NativeABI header is installed
-- verify the version-consistency and lifecycle tests
-- verify no stale 0.03 API documentation remains
-- verify MANIFEST does not include Handoff.md
+- 0.10 versions are consistent across public modules
+- Changes has a dated 0.10 release entry
+- README and public POD use the harmonized API vocabulary
+- NativeABI discovery matches the common H1/H2 discovery surface
+- the public NativeABI header is in MANIFEST and installed through Makefile.PL
+- HTTP1.xs uses the installed public ABI declaration
+- lifecycle and NativeABI discovery tests were added
+- active source and current docs contain no stale 0.03 API references
+- active source and current docs contain no old `inform()` API
+- current documentation uses Uniform::HTTP 0.06
+- Handoff.md remains outside the CPAN MANIFEST
+
+Remaining release gates:
+
+- run the complete test matrix on Linux Perl 5.16/current, macOS, and Windows
+- run POD checks
+- run distcheck and disttest
+- verify the built distribution contains the public NativeABI header
+- optionally rerun the HTTP1 and Linux::Event comparison diagnostics
+
+The connector-authored push to main did not start a GitHub Actions run. The
+local build environment also cannot reach GitHub and does not have
+Uniform::HTTP installed, so the live build/test gates remain explicitly open.
