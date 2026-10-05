@@ -3,8 +3,7 @@
 #include "perl.h"
 #include "XSUB.h"
 #include "uniform_http_fastpath.h"
-#include <stddef.h>
-#include <stdint.h>
+#include "unblock_http1_native_abi.h"
 
 #include "vendor/picohttpparser/picohttpparser.c"
 
@@ -835,12 +834,6 @@ ub_http1_parse_response_head_result(
     return newRV_noinc((SV *)hv);
 }
 
-#define UB_HTTP1_INPUT_ABI_VERSION 1U
-#define UB_HTTP1_INPUT_OK 0
-#define UB_HTTP1_INPUT_MORE 1
-#define UB_HTTP1_INPUT_CLOSED 3
-#define UB_HTTP1_INPUT_SWITCH 4
-
 typedef struct {
     const char *data;
     size_t length;
@@ -860,17 +853,6 @@ typedef struct {
     size_t max_headers;
     size_t max_head_size;
 } ub_http1_input_context;
-
-typedef struct {
-    uint32_t abi_version;
-    size_t struct_size;
-    const char *name;
-    void *(*create)(pTHX_ SV *engine);
-    int (*input)(pTHX_ void *context, const char *data, size_t length,
-        size_t *consumed);
-    int (*eof)(pTHX_ void *context);
-    void (*destroy)(pTHX_ void *context);
-} ub_http1_input_ops_v1;
 
 static ub_http1_borrowed_window *
 ub_http1_window_from_sv(pTHX_ SV *sv)
@@ -1434,6 +1416,13 @@ UV
 _borrowed_input_operations_address()
   CODE:
     RETVAL = PTR2UV(&ub_http1_input_ops);
+  OUTPUT:
+    RETVAL
+
+UV
+_borrowed_input_operations_size()
+  CODE:
+    RETVAL = (UV)sizeof(ub_http1_input_ops_v1);
   OUTPUT:
     RETVAL
 
