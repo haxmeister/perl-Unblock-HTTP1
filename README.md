@@ -17,8 +17,8 @@ Mojolicious, native transport code, or another event framework.
 
     cpanm Unblock::HTTP1
 
-The 0.10 release requires Perl 5.16 and Uniform::HTTP 0.06 or newer.
-The new attached-transport API is under release preparation.
+The upcoming 0.11 release requires Perl 5.16 and Uniform::HTTP 0.06 or newer.
+Linux::Event, IO::Async and AnyEvent are optional host frameworks.
 
 ## Start here
 
