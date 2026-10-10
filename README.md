@@ -18,7 +18,7 @@ Mojolicious, native transport code, or another event framework.
     cpanm Unblock::HTTP1
 
 The 0.10 release requires Perl 5.16 and Uniform::HTTP 0.06 or newer.
-The new API work on this feature branch has not yet been released.
+The new attached-transport API is under release preparation.
 
 ## Start here
 
@@ -96,8 +96,11 @@ sockets, output queue, and loop.
 - examples/io-async-client.pl
 - examples/anyevent-server.pl
 - examples/anyevent-client.pl
+- examples/linux-event-server.pl
 
-The examples separate adapter code from application code.
+The examples separate adapter code from application code. The Linux::Event
+server demonstrates the same host API using a Stream subclass and a
+separate application subclass. Linux::Event is not a required dependency.
 
 For complete instructions, read:
 
