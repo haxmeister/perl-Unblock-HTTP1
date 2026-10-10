@@ -149,3 +149,71 @@ Phase 1 investigation completed. The proposed compact host/embedding
 contract and any breaking changes are awaiting user approval.
 No engine code has yet been changed, and no tests have yet been run.
 Handoff.md is repository-only and must remain outside MANIFEST.
+
+## 2026-10-09/10: Implementation on feature/engine-embedding-api
+
+The approved independent HTTP1 embedding contract is implemented on this
+feature branch. Do not merge or release until explicitly requested.
+
+Application-facing changes:
+- Transaction->respond(status => ..., body => ...) and
+  send_informational(status => ...) build canonical Uniform responses.
+- Client->request(method => ..., target => ..., authority => ...) builds
+  canonical Uniform requests; callback fields stay transaction options.
+- Passing canonical Uniform Request/Response objects still works.
+
+Framework-facing changes:
+- Client->new(transport => $host) and Server->new(transport => $host).
+- The engine holds a weak host reference; no mandatory framework packages.
+- The host implements unblock_send($bytes), unblock_finish(), and
+  unblock_abort($reason).
+- unblock_send returns true/false/undef only after full acceptance; a false
+  return means congestion. resume_output() signals renewed host capacity.
+- Input methods are input($bytes), input_eof, transport_error($reason).
+- Output automatically flushes, including delayed responses produced outside
+  the read callback.
+- Manual output()/want_write() remains for no-host mode; output() croaks
+  when a host is attached.
+- Graceful host finish waits for all internal bytes to transfer into the
+  host queue. Fatal errors use immediate abort.
+- The server preserves a pending response after EOF if the full request
+  was already received. An unfinished request still errors at EOF.
+- Server on_switch callback waits until the outgoing handshake has been
+  accepted by the host; remainder handling is preserved.
+- Native borrowed head input now flushes attached output after the engine
+  drive scope has unwound. ABI v1 header and semantics were not changed.
+
+Tests:
+- t/50-embedding-api.t: host reference lifetime, output ownership,
+  named-fields construction, delayed response/EOF, pipelines,
+  backpressure, graceful close, fatal send errors, recursion,
+  Upgrade/CONNECT callback ordering, and validation.
+- t/51-embedding-native.t: borrowed server and client input and native
+  upgrade tail with attached host output.
+- Existing protocol, native, Uniform, framing and lifecycle tests retained.
+- test.yml checks Integration.pm POD syntax.
+- .github/workflows/framework-examples.yml installs optional IO::Async and
+  AnyEvent in CI and runs the complete example server/client pairs.
+- .github/workflows/benchmark-embedding.yml compares one-runner main manual,
+  feature manual, and feature attached host paths.
+- bench/embedding-overhead.pl implements that controlled in-memory workload.
+
+Documentation:
+- Reworked README, root POD, Client/Server/Transaction POD and
+  docs/INTEGRATION.md, plus docs/COOKBOOK.md.
+- Added installed lib/Unblock/HTTP1/Integration.pm.
+- Runnable IO::Async Stream-subclass and AnyEvent Handle-subclass examples,
+  both server and client, with adapter and application code delineated.
+- MANIFEST includes installed guide, examples, cookbook and tests.
+- Handoff.md is excluded by MANIFEST.SKIP and remains repo-only.
+
+CI/progress:
+- Cross-platform test matrix and framework examples have reported passing
+  results on intermediate implementation commits after native and AnyEvent
+  corrections. Confirm the *latest* head run again before any merge.
+- Measured runs show feature manual near main manual throughput, with attached
+  host dispatch adding a small but nonzero cost (roughly 4-7% vs main in
+  representative loaded CI runs). Avoid claiming a zero-cost adapter.
+- Repeat benchmarks on an idle, fixed host before drawing fine-grained
+  performance conclusions.
+- No versions were bumped, no releases tagged, and main was untouched.
