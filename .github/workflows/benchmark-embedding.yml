@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/engine-embedding-api
+      - main
     paths:
       - 'bench/embedding-overhead.pl'
       - 'lib/Unblock/HTTP1/**'
@@ -18,10 +18,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: candidate
-      - name: Check out released main baseline
+      - name: Check out released v0.10 baseline
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: v0.10
           path: baseline
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo 'BASELINE main manual'
+          echo 'BASELINE v0.10 manual'
           (cd baseline && perl -Mblib ../candidate/bench/embedding-overhead.pl manual 100000)
           echo 'CANDIDATE manual'
           (cd candidate && perl -Mblib bench/embedding-overhead.pl manual 100000)
