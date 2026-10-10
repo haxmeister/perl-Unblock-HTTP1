@@ -6,6 +6,7 @@ examples/anyevent-client.pl
 examples/anyevent-server.pl
 examples/io-async-client.pl
 examples/io-async-server.pl
+examples/linux-event-server.pl
 HTTP1.xs
 lib/Unblock/HTTP1.pm
 lib/Unblock/HTTP1/_Engine.pm
