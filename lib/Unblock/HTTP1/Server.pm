@@ -302,6 +302,7 @@ sub _transaction_respond {
         $tx->{keep_alive} = $plan->{keep_alive} ? 1 : 0;
         $self->_retire_if_done;
     }
+    $self->_transport_sync;
     return $tx;
 }
 
@@ -354,6 +355,7 @@ sub _transaction_write {
         $tx->{keep_alive} = $plan->{keep_alive} ? 1 : 0;
         $self->_retire_if_done;
     }
+    $self->_transport_sync;
     my $ok = $self->_stream_ok;
     $tx->{blocked} = 1 unless $ok;
     return $ok;
@@ -367,22 +369,33 @@ sub _retire_if_done {
         $tx->_mark_complete unless $tx->is_terminal;
         my $response = $tx->response;
         $self->_mark_switched;
-        my $cb = $self->_invoke_server('on_switch', $tx, $response);
         $self->{active} = undef;
-        return $self->_application_error($cb) unless $cb eq '1';
-        return;
+        if ($self->{transport_attached}) {
+            $self->{switch_notice} = [ $tx, $response ];
+            $self->_transport_sync;
+            return;
+        }
+        return $self->_deliver_switch_notice($tx, $response);
     }
     $tx->_mark_complete unless $tx->is_terminal;
     my $keep = $tx->{keep_alive};
     $keep = $tx->{request_keep_alive} unless defined $keep;
     $self->{active} = undef;
-    if (!$keep) {
+    if (!$keep || $self->{eof}) {
         $self->{closed} = 1;
+        $self->_transport_sync;
         return;
     }
     return if $self->{driving};
     local $self->{driving} = 1;
     $self->_drive if $self->_input_length;
+    return;
+}
+
+sub _deliver_switch_notice {
+    my ($self, $tx, $response) = @_;
+    my $cb = $self->_invoke_server('on_switch', $tx, $response);
+    $self->_application_error($cb) unless $cb eq '1';
     return;
 }
 
@@ -393,6 +406,8 @@ sub _transaction_cancel {
     $self->{active} = undef if $self->{active} && $self->{active} == $tx;
     $self->{rx} = undef;
     $self->{closed} = 1;
+    $self->_transport_abort('HTTP/1 transaction cancelled')
+        if $self->{transport_attached};
     return;
 }
 
@@ -470,6 +485,12 @@ sub _borrowed_native_head_ready {
 sub _on_eof {
     my ($self) = @_;
     return if $self->{switched};
+    if ($self->{active} && $self->{active}{remote_done}) {
+        # A fully received request may still have a delayed application
+        # response. Read EOF prevents reuse but does not cancel that reply.
+        $self->{active}{request_keep_alive} = 0;
+        return;
+    }
     if ($self->{active} || length($self->{input})) {
         $self->_protocol_error(400, 'unexpected EOF in HTTP/1 request');
     } else {
