@@ -57,6 +57,9 @@ sub respond {
     my ($response, %option);
     if (@arg && ref($arg[0])) {
         $response = shift @arg;
+        croak 'respond(): requires a Uniform HTTP response object'
+            unless ref($response) && $response->can('status')
+                && $response->can('header_count');
         croak 'respond(): options must be key/value pairs' if @arg % 2;
         %option = @arg;
     } else {
@@ -81,6 +84,9 @@ sub send_informational {
         croak 'send_informational(): response object does not take options'
             unless @arg == 1;
         $response = $arg[0];
+        croak 'send_informational(): requires a Uniform HTTP response object'
+            unless ref($response) && $response->can('status')
+                && $response->can('header_count');
     } else {
         croak 'send_informational(): response fields must be key/value pairs'
             if @arg % 2;
