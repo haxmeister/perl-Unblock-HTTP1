@@ -6,7 +6,8 @@ own sockets, TLS sessions, or event loops.
 **Start here:** the installed perldoc page Unblock::HTTP1::Integration contains
 the full callback, ownership, shutdown, Upgrade/CONNECT, and backpressure
 contract. The runnable examples are in examples/ and introduced in
-docs/COOKBOOK.md.
+docs/COOKBOOK.md. The Linux::Event server example lives in
+examples/linux-event-server.pl; Linux::Event remains an optional dependency.
 
 ## The small host interface
 
