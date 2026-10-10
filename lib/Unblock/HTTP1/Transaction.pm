@@ -6,7 +6,7 @@ use Carp qw(croak);
 use Scalar::Util qw(weaken blessed);
 use Uniform::HTTP::Response;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 sub _new {
     my ($class, $owner, $request, %args) = @_;
