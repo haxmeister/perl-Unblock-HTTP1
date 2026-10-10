@@ -245,4 +245,69 @@ subtest 'pipelined requests preserve ordering through host output' => sub {
     is($host->{writes}, 1, 'parser coalesces response output on read');
 };
 
+
+subtest 'named and object response forms reject malformed objects' => sub {
+    my $host = Local::Host->new;
+    my $pending;
+    my $server = Unblock::HTTP1::Server->new(
+        transport => $host,
+        on_request => sub { $pending = $_[0] },
+    );
+    $server->input($get);
+    my $ok = eval { $pending->respond({ status => 200 }); 1 };
+    ok(!$ok, 'hash reference is not a Uniform response');
+    like($@, qr/requires a Uniform HTTP response object/,
+        'response validation error is explicit');
+    $ok = eval { $pending->send_informational({ status => 103 }); 1 };
+    ok(!$ok, 'informational response checks object');
+    like($@, qr/requires a Uniform HTTP response object/,
+        'informational validation error is explicit');
+    $pending->respond(status => 200, body => 'valid');
+    like($host->{bytes}, qr/valid\z/, 'valid named response remains usable');
+};
+
+subtest 'graceful close waits behind congested host' => sub {
+    my $host = Local::Host->new(returns => [ 0, undef ]);
+    my $pending;
+    my $server = Unblock::HTTP1::Server->new(
+        transport => $host,
+        on_request => sub { $pending = $_[0] },
+    );
+    $server->input(
+        "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n"
+    );
+    $pending->send_informational(status => 103);
+    $pending->respond(status => 200, body => 'final');
+    is($host->{finish}, 0, 'close deferred while final body still buffered');
+    unlike($host->{bytes}, qr/final/, 'final response not yet accepted');
+    $server->resume_output;
+    like($host->{bytes}, qr/final\z/, 'final response accepted on resume');
+    is($host->{finish}, 1, 'close follows complete output handoff');
+};
+
+subtest 'failed switch callback aborts rather than leaves an orphan host' => sub {
+    my $host = Local::Host->new;
+    my $server = Unblock::HTTP1::Server->new(
+        transport => $host,
+        on_request => sub {
+            $_[0]->respond(
+                status => 101,
+                headers => [
+                    [ Connection => 'Upgrade' ],
+                    [ Upgrade => 'test-proto' ],
+                ],
+            );
+        },
+        on_switch => sub { die 'upgrade adapter failed' },
+    );
+    $server->input(
+        "GET / HTTP/1.1\r\nHost: example.test\r\n"
+        . "Connection: Upgrade\r\nUpgrade: test-proto\r\n\r\n"
+    );
+    is(scalar @{ $host->{abort} }, 1, 'switch callback failure aborts host');
+    like($host->{abort}[0], qr/upgrade adapter failed/,
+        'switch callback failure reason preserved');
+    is($host->{finish}, 0, 'no graceful finish after fatal switch');
+};
+
 done_testing;
