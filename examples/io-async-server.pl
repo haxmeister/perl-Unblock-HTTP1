@@ -6,61 +6,80 @@ use IO::Async::Listener;
 use IO::Async::Loop;
 use Unblock::HTTP1::Server;
 
-# ADAPTER CODE: this class is the framework's normal stream object.
-# It owns HTTP protocol state. HTTP retains only a weak reference back to it.
+# --------------------------------------------------
+# ADAPTER: an IO::Async::Stream with HTTP built in
+# --------------------------------------------------
+
 {
-    package Local::HTTPStream;
+    package My::HTTPStream;
     use parent 'IO::Async::Stream';
 
-    sub attach_http {
-        my ($self, $on_request) = @_;
-        $self->configure(
+    sub new {
+        my ($class, %args) = @_;
+
+        my $on_request = delete $args{on_request}
+            or die "on_request is required\n";
+
+        my $self = $class->SUPER::new(
+            %args,
             close_on_read_eof => 0,
-            on_read => sub {
-                my ($stream, $bufref, $eof) = @_;
-                if (length $$bufref) {
-                    my $bytes = $$bufref;
-                    $$bufref = '';
-                    $stream->{http1}->input($bytes);
-                }
-                $stream->{http1}->input_eof
-                    if $eof && !$stream->{http1}->is_closed
-                    && !$stream->{http1}->is_switched;
-                return 0;
-            },
-            on_read_error => sub {
-                my ($stream, $error) = @_;
-                $stream->{http1}->transport_error("read error: $error");
-            },
-            on_write_error => sub {
-                my ($stream, $error) = @_;
-                $stream->{http1}->transport_error("write error: $error");
-            },
         );
-        $self->{http1} = Unblock::HTTP1::Server->new(
-            transport => $self,
+
+        $self->{http} = Unblock::HTTP1::Server->new(
+            transport  => $self,
             on_request => $on_request,
         );
+
         return $self;
+    }
+
+    sub on_read {
+        my ($self, $buffer, $eof) = @_;
+
+        if (length $$buffer) {
+            my $bytes = $$buffer;
+            $$buffer = '';
+            $self->{http}->input($bytes);
+        }
+
+        if ($eof && !$self->{http}->is_closed
+                 && !$self->{http}->is_switched) {
+            $self->{http}->input_eof;
+        }
+
+        return 0;
+    }
+
+    sub on_read_error {
+        my ($self, $error) = @_;
+        $self->{http}->transport_error("read error: $error");
+    }
+
+    sub on_write_error {
+        my ($self, $error) = @_;
+        $self->{http}->transport_error("write error: $error");
     }
 
     sub unblock_send {
         my ($self, $bytes) = @_;
         $self->write($bytes);
-        return; # IO::Async owns the full output queue.
+        return; # IO::Async owns the complete output queue.
     }
 
     sub unblock_finish { $_[0]->close_when_empty; return }
     sub unblock_abort  { $_[0]->close_now; return }
 }
 
-# APPLICATION CODE: no HTTP parsing, output pumping, or Uniform constructors.
+# --------------------------------------------------
+# APPLICATION: ordinary HTTP server
+# --------------------------------------------------
+
 my $on_request = sub {
     my ($tx, $request) = @_;
+
     $tx->respond(
-        status  => 200,
-        headers => [ [ 'Content-Type' => 'text/plain' ] ],
-        body    => "hello from IO::Async\n",
+        status => 200,
+        body   => "hello from IO::Async\n",
     );
 };
 
@@ -69,15 +88,22 @@ die "usage: $0 [PORT]\n"
     unless $port =~ /\A[0-9]+\z/ && $port >= 1 && $port <= 65535;
 
 my $loop = IO::Async::Loop->new;
+
 my $listener = IO::Async::Listener->new(
-    handle_class => 'Local::HTTPStream',
     on_accept => sub {
-        my ($listener, $stream) = @_;
-        $stream->attach_http($on_request);
+        my ($listener, $socket) = @_;
+
+        my $stream = My::HTTPStream->new(
+            handle     => $socket,
+            on_request => $on_request,
+        );
+
         $loop->add($stream);
     },
 );
+
 $loop->add($listener);
 $listener->listen(service => $port, socktype => 'stream')->get;
+
 print "listening on port $port\n";
 $loop->run;
