@@ -9,58 +9,58 @@ use Unblock::HTTP1::Client;
 # ADAPTER: an IO::Async::Stream with an HTTP client
 # --------------------------------------------------
 
-{
-    package My::HTTPClientStream;
-    use parent 'IO::Async::Stream';
+package My::HTTPClientStream;
+use parent 'IO::Async::Stream';
 
-    sub new {
-        my ($class, %args) = @_;
+sub new {
+    my ($class, %args) = @_;
 
-        my $self = $class->SUPER::new(
-            %args,
-            close_on_read_eof => 0,
-        );
+    my $self = $class->SUPER::new(
+        %args,
+        close_on_read_eof => 0,
+    );
 
-        $self->{http} = Unblock::HTTP1::Client->new(transport => $self);
-        return $self;
-    }
-
-    sub on_read {
-        my ($self, $buffer, $eof) = @_;
-
-        if (length $$buffer) {
-            my $bytes = $$buffer;
-            $$buffer = '';
-            $self->{http}->input($bytes);
-        }
-
-        if ($eof && !$self->{http}->is_closed
-                 && !$self->{http}->is_switched) {
-            $self->{http}->input_eof;
-        }
-
-        return 0;
-    }
-
-    sub on_read_error {
-        my ($self, $error) = @_;
-        $self->{http}->transport_error("read error: $error");
-    }
-
-    sub on_write_error {
-        my ($self, $error) = @_;
-        $self->{http}->transport_error("write error: $error");
-    }
-
-    sub unblock_send {
-        my ($self, $bytes) = @_;
-        $self->write($bytes);
-        return;
-    }
-
-    sub unblock_finish { $_[0]->close_when_empty; return }
-    sub unblock_abort  { $_[0]->close_now; return }
+    $self->{http} = Unblock::HTTP1::Client->new(transport => $self);
+    return $self;
 }
+
+sub on_read {
+    my ($self, $buffer, $eof) = @_;
+
+    if (length $$buffer) {
+        my $bytes = $$buffer;
+        $$buffer = '';
+        $self->{http}->input($bytes);
+    }
+
+    if ($eof && !$self->{http}->is_closed
+             && !$self->{http}->is_switched) {
+        $self->{http}->input_eof;
+    }
+
+    return 0;
+}
+
+sub on_read_error {
+    my ($self, $error) = @_;
+    $self->{http}->transport_error("read error: $error");
+}
+
+sub on_write_error {
+    my ($self, $error) = @_;
+    $self->{http}->transport_error("write error: $error");
+}
+
+sub unblock_send {
+    my ($self, $bytes) = @_;
+    $self->write($bytes);
+    return;
+}
+
+sub unblock_finish { $_[0]->close_when_empty; return }
+sub unblock_abort  { $_[0]->close_now; return }
+
+package main;
 
 # --------------------------------------------------
 # APPLICATION: ordinary HTTP client
