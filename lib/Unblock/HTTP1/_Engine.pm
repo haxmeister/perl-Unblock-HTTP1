@@ -84,7 +84,7 @@ sub input {
         local $self->{driving} = 1;
         $self->_drive;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return length $copy;
 }
 
@@ -103,7 +103,7 @@ sub _input_borrowed {
             local $self->{driving} = 1;
             $self->_drive;
         }
-        $self->_transport_sync;
+        $self->_transport_sync if $self->{transport_attached};
 
         my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
         return ($status, $length, $self->_borrowed_native_head_ready);
@@ -135,7 +135,7 @@ sub _input_borrowed {
         $consumed = $self->{borrowed_offset};
         $head_ready = $self->_borrowed_native_head_ready;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return ($status, $consumed, $head_ready);
 }
 
@@ -218,7 +218,7 @@ sub input_eof {
         local $self->{driving} = 1;
         $self->_on_eof;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return $self;
 }
 
@@ -253,7 +253,7 @@ sub close {
     return $self if $self->{closed};
     $self->{closed} = 1;
     $self->_fail_all(defined($error) && length($error) ? "$error" : 'HTTP/1 connection closed');
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return $self;
 }
 
@@ -263,7 +263,7 @@ sub _queue_output {
     croak '_queue_output(): host send callback must not re-enter the engine'
         if $self->{transport_syncing};
     $self->{output} .= $bytes;
-    $self->_transport_sync unless $self->{driving};
+    $self->_transport_sync if $self->{transport_attached} && !$self->{driving};
     return;
 }
 
@@ -334,10 +334,10 @@ sub resume_output {
         if $self->{transport_syncing};
     return $self if $self->{transport_finished} || $self->{transport_aborted};
     $self->{transport_blocked} = 0;
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     if (!$self->{transport_blocked} && length($self->{output}) <= $self->{low_water}) {
         $self->_maybe_drain;
-        $self->_transport_sync;
+        $self->_transport_sync if $self->{transport_attached};
     }
     return $self;
 }
