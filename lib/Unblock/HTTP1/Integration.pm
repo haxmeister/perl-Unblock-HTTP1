@@ -37,10 +37,13 @@ Start with the complete programs in the repository:
     examples/io-async-client.pl
     examples/anyevent-server.pl
     examples/anyevent-client.pl
+    examples/linux-event-server.pl
 
 Each uses a framework-native Stream or Handle subclass. The example files
-separate adapter code from application code with comments. They can be run
-against one another using port 8080, or with a different port argument.
+separate adapter code from application code with comments. The IO::Async and
+AnyEvent server/client pairs can be run against one another using port 8080,
+or with a different port argument. The Linux::Event server is Linux-only and
+can be exercised using curl; Linux::Event is not a required dependency.
 
 This installed page is the general integration guide. The repository also has
 docs/INTEGRATION.md and docs/COOKBOOK.md.
