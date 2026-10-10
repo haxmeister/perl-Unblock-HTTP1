@@ -119,14 +119,18 @@ sub _input_native_head {
     croak '_input_native_head(): response body is already active'
         if $self->{rx};
 
-    local $self->{borrowed_head} = $head;
-    local $self->{borrowed_message} = $response;
-    local $self->{native_head_preconsumed} = 1;
-    local $self->{driving} = 1;
-    $self->_drive;
-
-    my $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
-    return ($status, $self->_borrowed_native_head_ready);
+    my ($status, $ready);
+    {
+        local $self->{borrowed_head} = $head;
+        local $self->{borrowed_message} = $response;
+        local $self->{native_head_preconsumed} = 1;
+        local $self->{driving} = 1;
+        $self->_drive;
+        $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
+        $ready = $self->_borrowed_native_head_ready;
+    }
+    $self->_transport_sync;
+    return ($status, $ready);
 }
 
 sub _drive {
