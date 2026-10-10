@@ -1,0 +1,57 @@
+name: framework-examples
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+      - name: Install distribution and optional framework dependencies
+        run: |
+          cpanm --notest Uniform::HTTP@0.06
+          cpanm --notest --installdeps .
+          cpanm --notest IO::Async AnyEvent
+          perl Makefile.PL
+          make
+      - name: Run real framework server/client pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for framework in io-async anyevent; do
+            if [ "$framework" = io-async ]; then port=18581; else port=18582; fi
+            perl -Mblib examples/${framework}-server.pl "$port" > "server-${framework}.log" 2>&1 &
+            pid=$!
+            ready=0
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              if curl --silent --fail --max-time 1 "http://127.0.0.1:${port}/" > /dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            if [ "$ready" != 1 ]; then
+              cat "server-${framework}.log"
+              exit 1
+            fi
+            timeout 15s perl -Mblib examples/${framework}-client.pl "$port" > "client-${framework}.log" 2>&1 || {
+              cat "server-${framework}.log"
+              cat "client-${framework}.log"
+              exit 1
+            }
+            grep -q 'HTTP status: 200' "client-${framework}.log" || {
+              cat "client-${framework}.log"
+              exit 1
+            }
+            grep -q 'hello from' "client-${framework}.log" || {
+              cat "client-${framework}.log"
+              exit 1
+            }
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            echo "${framework}: server/client smoke passed"
+          done
