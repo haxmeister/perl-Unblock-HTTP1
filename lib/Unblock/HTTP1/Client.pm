@@ -560,35 +560,403 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP1::Client - Standalone HTTP/1 client protocol engine
+Unblock::HTTP1::Client - One non-blocking HTTP/1 client connection
+
+=head1 SYNOPSIS
+
+    use Unblock::HTTP1::Client;
+
+    my $client = Unblock::HTTP1::Client->new(
+        transport => $transport,
+    );
+
+    my $tx = $client->request(
+        method    => 'GET',
+        target    => '/',
+        authority => 'example.com',
+
+        on_response => sub {
+            my ($tx, $response) = @_;
+            print $response->status, "\n";
+        },
+
+        on_body => sub {
+            my ($tx, $response, $bytes) = @_;
+            consume($bytes);
+        },
+
+        on_complete => sub {
+            my ($tx) = @_;
+            print "done\n";
+        },
+    );
 
 =head1 DESCRIPTION
 
-This object owns one HTTP/1 client connection's protocol state. It does not
-open a socket or run an event loop. Feed received bytes with C<input()>, signal
-transport EOF with C<input_eof()>, and drain generated wire bytes with
+C<Unblock::HTTP1::Client> owns the HTTP/1 protocol state for one client
+connection.
+
+It does not open a socket, perform DNS, negotiate TLS, or run an event loop.
+Those jobs belong to the host framework.
+
+Supply C<transport =E<gt> $host> to C<new()> to deliver outgoing wire
+bytes automatically through the host. The host owns its socket and implements
+C<unblock_send()>, C<unblock_finish()>, and C<unblock_abort()>.
+See L<Unblock::HTTP1::Integration> for a complete example and the contract.
+
+The lower-level form is:
+
+    my $client = Unblock::HTTP1::Client->new;
+
+In that mode the caller feeds input with C<input()> and drains output with
 C<output()>.
 
-Requests are queued serially. This Client API intentionally does not pipeline
-requests on one connection. Callers that need parallel HTTP/1 work can use
-multiple connections without changing the protocol engine.
+One Client object represents one HTTP/1 connection. Requests may be queued, but
+this implementation sends them serially. It does not enable HTTP/1 pipelining.
+
+=head1 CONSTRUCTOR
+
+=head2 new
+
+    my $client = Unblock::HTTP1::Client->new(%options);
+
+Creates one client protocol engine.
+
+Common options are:
+
+=over 4
+
+=item C<transport>
+
+Optional framework-owned object implementing C<unblock_send($bytes)>,
+C<unblock_finish()>, and C<unblock_abort($reason)>.
+The engine holds a weak reference to it. See L<Unblock::HTTP1::Integration>.
+
+=item C<max_head_size>
+
+Maximum response head size in bytes. Default: 65536.
+
+=item C<max_headers>
+
+Maximum number of header or trailer fields. Default: 100.
+
+=item C<max_chunk_extension_size>
+
+Maximum total chunk-extension bytes allowed for one chunked message.
+Default: 16384.
+
+=item C<high_water>
+
+High-water mark for the HTTP output queue. Default: 65536.
+
+=item C<low_water>
+
+Low-water mark used to resume a blocked streaming producer. Default: 32768.
+
+=back
+
+=head1 REQUESTS
+
+=head2 request
+
+    my $tx = $client->request(
+        method    => 'GET',
+        target    => '/',
+        authority => 'example.com',
+        on_response => sub { ... },
+    );
+
+Queues one HTTP request and returns an L<Unblock::HTTP1::Transaction>.
+
+The normal form accepts request fields directly. C<request()> constructs the
+canonical L<Uniform::HTTP::Request> internally.
+
+If the caller already has a Uniform request object it can be passed directly:
+
+    my $tx = $client->request(
+        $request,
+        on_response => sub { ... },
+    );
+
+Request fields and transaction options are intentionally separate. In the
+concise form these names are consumed by the HTTP transaction rather than
+passed to C<Uniform::HTTP::Request-E<gt>new()>:
+
+    stream_body
+    on_informational
+    on_response
+    on_body
+    on_complete
+    on_error
+    on_switch
+    on_drain
+
+All other fields are request-construction fields.
+
+Requests are queued in call order. The next request starts only after the
+current transaction completes and the connection is reusable.
+
+=head2 transaction
+
+    my $tx = $client->transaction;
+
+Returns the currently active transaction, or undef when no request is active.
+
+Queued transactions are not returned by this method.
 
 =head1 REQUEST CALLBACKS
 
-C<request()> accepts these callbacks:
+Callbacks belong to the transaction returned by C<request()>.
 
-    on_informational => sub { my ($transaction, $response) = @_ }
-    on_response      => sub { my ($transaction, $response) = @_ }
-    on_body          => sub { my ($transaction, $response, $bytes) = @_ }
-    on_complete      => sub { my ($transaction) = @_ }
-    on_error         => sub { my ($transaction, $error) = @_ }
-    on_switch        => sub { my ($transaction, $response) = @_ }
-    on_drain         => sub { my ($transaction) = @_ }
+=head2 on_informational
 
-C<on_drain> is used with C<stream_body =E<gt> 1>.
+    on_informational => sub {
+        my ($tx, $response) = @_;
+    }
 
-When a 101 response or successful CONNECT switches away from HTTP, the engine
-stops HTTP parsing. C<take_remainder()> returns bytes that followed the HTTP
-head in the same transport read.
+Called for each informational response from 100 through 199, except 101.
+
+The C<$response> is a canonical L<Uniform::HTTP::Response>. A 101 response is
+handled as a protocol switch and goes to C<on_switch> instead.
+
+=head2 on_response
+
+    on_response => sub {
+        my ($tx, $response) = @_;
+    }
+
+Called once when the final response head has been parsed.
+
+The response body may not have arrived yet. Body bytes are delivered later
+through C<on_body>.
+
+=head2 on_body
+
+    on_body => sub {
+        my ($tx, $response, $bytes) = @_;
+    }
+
+Called zero or more times with response body bytes.
+
+HTTP transfer framing such as chunk boundaries has already been removed.
+Unblock does not automatically decode content codings such as gzip.
+
+=head2 on_complete
+
+    on_complete => sub {
+        my ($tx) = @_;
+    }
+
+Called when the complete request/response exchange is finished.
+
+For a streaming request body, completion requires the local request body to be
+finished as well as the final response to be complete.
+
+=head2 on_error
+
+    on_error => sub {
+        my ($tx, $error) = @_;
+    }
+
+Called when the transaction fails.
+
+Protocol errors, unexpected EOF, callback failures, transport failure, or a
+non-reusable connection that invalidates queued work can lead here.
+
+The transaction state is C<error> when this callback is invoked.
+
+=head2 on_switch
+
+    on_switch => sub {
+        my ($tx, $response) = @_;
+    }
+
+Called when a 101 response or successful CONNECT transfers ownership of the
+connection away from HTTP.
+
+After this callback, C<is_switched()> is true. Any bytes already read beyond
+the HTTP boundary can be obtained with C<take_remainder()>.
+
+Queued HTTP requests cannot continue after a switch.
+
+=head2 on_drain
+
+    on_drain => sub {
+        my ($tx) = @_;
+    }
+
+Used only with C<stream_body =E<gt> 1>.
+
+If C<$tx-E<gt>write()> returns false, the supplied bytes were accepted but the
+producer should pause. C<on_drain> runs when the HTTP output path becomes
+writable again.
+
+=head1 STREAMING REQUEST BODIES
+
+Use C<stream_body> when the request body is produced incrementally:
+
+    my $tx = $client->request(
+        method      => 'POST',
+        target      => '/upload',
+        authority   => 'example.com',
+        stream_body => 1,
+        on_drain    => sub { produce_more() },
+    );
+
+    $tx->write($chunk);
+    $tx->end($last_chunk);
+
+C<write()> and C<end()> are methods on the Transaction.
+
+For HTTP/1.1, chunked transfer framing is used when required. An explicit
+Content-Length is honored and enforced.
+
+A false return from C<write()> means the bytes were accepted but the producer
+should wait for C<on_drain> before producing more.
+
+=head1 CONNECTION INPUT
+
+=head2 input
+
+    my $accepted = $client->input($bytes);
+
+Feeds received response bytes into the engine.
+
+The portable input path copies the supplied bytes into engine-owned storage as
+needed. The return value is the number of supplied bytes accepted by the
+engine.
+
+Do not call C<input()> recursively from an HTTP callback.
+
+=head2 input_eof
+
+    $client->input_eof;
+
+Reports a clean read-side EOF. Unlike a transport error, a fully received
+request may still receive a delayed response after EOF. EOF also delimits
+some client response bodies. Do not use C<input('')> as EOF.
+
+=head2 transport_error
+
+    $client->transport_error($reason);
+
+Reports a broken socket, TLS failure, or other unusable transport. Unsent
+HTTP output is discarded; outstanding work fails and C<unblock_abort()> is
+called. Do not call this on ordinary read-side EOF.
+
+=head1 CONNECTION OUTPUT
+
+=head2 want_write
+
+    if ($client->want_write) {
+        ...
+    }
+
+True when the engine has bytes buffered for output.
+
+Normally unnecessary when a transport is attached because output is forwarded
+automatically.
+
+=head2 output
+
+    my $bytes = $client->output;
+    my $bytes = $client->output($maximum);
+
+Removes and returns queued wire bytes in manual integration mode.
+C<output()> throws when a transport is attached to prevent mixed ownership.
+
+C<$maximum>, when supplied, must be a positive integer.
+
+Draining the queue below the low-water mark may trigger transaction
+C<on_drain>.
+
+Do not call C<output()> recursively from an HTTP callback.
+
+=head2 resume_output
+
+    $client->resume_output;
+
+Called by an attached host after C<unblock_send()> returned a defined false
+value (meaning complete acceptance followed by congestion). The host must
+call this again when it can accept more output. It can trigger a streaming
+Transaction's C<on_drain> callback.
+
+An output-queueing host that always returns undef does not need it.
+
+=head1 CONNECTION STATE
+
+=head2 want_read
+
+    $client->want_read;
+
+True while the engine is still accepting HTTP input.
+
+It becomes false after read EOF, close, or protocol switch.
+
+=head2 is_closed
+
+    $client->is_closed;
+
+True when the HTTP connection is closed.
+
+=head2 is_switched
+
+    $client->is_switched;
+
+True after HTTP ownership ended because of 101 or successful CONNECT.
+
+=head2 take_remainder
+
+    my $bytes = $client->take_remainder;
+
+Returns bytes already received after the HTTP protocol boundary.
+
+This method is valid only after C<is_switched()> becomes true.
+
+=head2 close
+
+    $client->close;
+    $client->close($reason);
+
+Closes the HTTP engine and fails unfinished transactions.
+
+With an attached transport, already queued HTTP output is handed to the
+transport before graceful close when possible.
+
+Use C<transport_error()> instead when the transport itself has failed.
+
+=head1 TRANSACTION OBJECTS
+
+C<request()> returns L<Unblock::HTTP1::Transaction>.
+
+Use that object for:
+
+    request
+    response
+    write
+    end
+    cancel
+    state
+    error
+    is_complete
+    is_cancelled
+    is_error
+    is_terminal
+
+=head1 NATIVE INPUT
+
+XS-backed transports can use L<Unblock::HTTP1::NativeABI> to feed borrowed
+native buffers without changing the Client object or application API.
+
+The normal C<input()> method remains the portable correctness path.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP1::Integration>,
+L<Unblock::HTTP1>,
+L<Unblock::HTTP1::Transaction>,
+L<Unblock::HTTP1::NativeABI>,
+L<Uniform::HTTP::Request>,
+L<Uniform::HTTP::Response>
 
 =cut
