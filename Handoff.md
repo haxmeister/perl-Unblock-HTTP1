@@ -241,3 +241,41 @@ application nesting in the IO::Async examples.
   now use ordinary package declarations with an explicit package main before
   application code. No unnecessary braces or artificial indentation around
   package definitions. Engine and callback APIs are unchanged.
+
+## 2026-10-10: Embedding API merged and 0.11 audit in progress
+
+The user authorized merging the accepted feature into main and starting a
+release audit. Pull request #3 merged feature/engine-embedding-api on main at
+9529b6472d3fe69841fbbeabc31df9fbbdbd71a8.
+
+Integration:
+- Added examples/linux-event-server.pl. Its Example::HTTPStream subclass owns
+  Unblock::HTTP1::Server, uses weak callback capture and native Linux::Event
+  on_data, on_eof, on_error, on_drain callbacks, and implements the three
+  unblock_* host operations through write, end and close. A separate
+  application subclass implements on_http_request.
+- The Linux::Event subclass is constructed by the standard Listener stream
+  recipe. It checks for a terminal write failure before returning the
+  Linux::Event write backpressure result.
+- Added the example to MANIFEST, README, cookbook and integration guides.
+  Linux::Event is optional and Linux-only, not a Makefile.PL prerequisite.
+- Added a dedicated Linux::Event v0.117 smoke job alongside IO::Async and
+  AnyEvent smoke jobs. All three succeeded on feature head e46ab472.
+- A first smoke exposed a misplaced lexical weaken import. This was fixed
+  before merging; the latest feature head smoke passed.
+
+Release audit work on main:
+- Set public distribution/module versions to 0.11 (HTTP1, Client, Server,
+  Transaction and Integration); NativeABI derives its version from HTTP1.
+- Expanded t/00-load.t and t/01-version.t to cover Integration.
+- Added 0.11 Changes entry and refreshed README/installed perldoc.
+- Kept existing native ABI v1, public native header and Uniform::HTTP 0.06
+  minimum; no mandatory framework dependencies were added.
+- Benchmark-embedding now uses released v0.10 as its baseline, not main.
+- CI tests validate Perl 5.16/latest Linux, macOS, Windows, POD, distcheck,
+  disttest and optional live framework examples.
+- Handoff.md remains excluded from the CPAN distribution.
+
+No 0.11 tag, GitHub release, or CPAN upload has been made.
+Review latest main CI after final audit edits. Performance benchmarks on hosted
+runners are provisional; the portable engine fast path remains available.
