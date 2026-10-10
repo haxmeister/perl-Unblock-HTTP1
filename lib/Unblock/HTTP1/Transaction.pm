@@ -3,7 +3,7 @@ package Unblock::HTTP1::Transaction;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Scalar::Util qw(weaken);
+use Scalar::Util qw(weaken blessed);
 use Uniform::HTTP::Response;
 
 our $VERSION = '0.10';
@@ -58,7 +58,7 @@ sub respond {
     if (@arg && ref($arg[0])) {
         $response = shift @arg;
         croak 'respond(): requires a Uniform HTTP response object'
-            unless ref($response) && $response->can('status')
+            unless blessed($response) && $response->can('status')
                 && $response->can('header_count');
         croak 'respond(): options must be key/value pairs' if @arg % 2;
         %option = @arg;
@@ -85,7 +85,7 @@ sub send_informational {
             unless @arg == 1;
         $response = $arg[0];
         croak 'send_informational(): requires a Uniform HTTP response object'
-            unless ref($response) && $response->can('status')
+            unless blessed($response) && $response->can('status')
                 && $response->can('header_count');
     } else {
         croak 'send_informational(): response fields must be key/value pairs'
