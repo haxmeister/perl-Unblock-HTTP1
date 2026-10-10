@@ -280,7 +280,10 @@ sub _transport_sync {
     {
         local $self->{transport_syncing} = 1;
         while (!$self->{transport_blocked} && length $self->{output}) {
+            # No producer may re-enter during host send. Move this complete
+            # buffer out once; a thrown send aborts rather than retransmits.
             my $bytes = $self->{output};
+            $self->{output} = '';
             my ($accepted, $ready);
             $accepted = eval { $ready = $host->unblock_send($bytes); 1 };
             if (!$accepted) {
@@ -288,7 +291,6 @@ sub _transport_sync {
                 $self->_transport_abort($error);
                 return;
             }
-            substr($self->{output}, 0, length($bytes), '');
             $self->{transport_blocked} = 1 if defined($ready) && !$ready;
         }
     }
