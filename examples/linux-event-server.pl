@@ -6,12 +6,12 @@ use warnings;
 use Linux::Event::IO::Sock::Listener;
 use Linux::Event::IO::Sock::Stream;
 use Linux::Event::Loop;
-use Scalar::Util qw(weaken);
 use Unblock::HTTP1::Server;
 
 # ADAPTER CODE: HTTP lives inside the normal Linux::Event stream.
 package Example::HTTPStream;
 use parent 'Linux::Event::IO::Sock::Stream';
+use Scalar::Util qw(weaken);
 
 sub new ($class, %args) {
     my $self = $class->SUPER::new(%args);
