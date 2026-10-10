@@ -129,7 +129,7 @@ sub _input_native_head {
         $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
         $ready = $self->_borrowed_native_head_ready;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return ($status, $ready);
 }
 
@@ -239,7 +239,7 @@ sub _drive {
                 $self->{active} = undef;
                 if ($self->{transport_attached}) {
                     $self->{switch_notice} = [ $tx, $response ];
-                    $self->_transport_sync;
+                    $self->_transport_sync if $self->{transport_attached};
                     return;
                 }
                 return $self->_deliver_switch_notice($tx, $response);
@@ -412,14 +412,14 @@ sub _retire_if_done {
         $self->_input_clear;
         $self->{closed} = 1;
         $self->_fail_queued('unexpected bytes after final HTTP/1 response');
-        $self->_transport_sync;
+        $self->_transport_sync if $self->{transport_attached};
         return;
     }
 
     if (!$keep) {
         $self->{closed} = 1;
         $self->_fail_queued('HTTP/1 connection is not reusable');
-        $self->_transport_sync;
+        $self->_transport_sync if $self->{transport_attached};
         return;
     }
     $self->_start_next;
@@ -455,7 +455,7 @@ sub _transaction_write {
     }
 
     $self->_retire_if_done if $tx->{local_done};
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     my $ok = $self->_stream_ok;
     $tx->{blocked} = 1 unless $ok;
     return $ok;
