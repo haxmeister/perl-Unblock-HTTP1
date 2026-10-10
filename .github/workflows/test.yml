@@ -72,6 +72,7 @@ jobs:
           podchecker lib/Unblock/HTTP1/Server.pm
           podchecker lib/Unblock/HTTP1/Transaction.pm
           podchecker lib/Unblock/HTTP1/NativeABI.pm
+          podchecker lib/Unblock/HTTP1/Integration.pm
 
       - name: Check POD syntax on Windows
         if: runner.os == 'Windows'
@@ -82,6 +83,7 @@ jobs:
           podchecker lib/Unblock/HTTP1/Server.pm
           podchecker lib/Unblock/HTTP1/Transaction.pm
           podchecker lib/Unblock/HTTP1/NativeABI.pm
+          podchecker lib/Unblock/HTTP1/Integration.pm
 
       - name: Check distribution manifest
         if: matrix.os == 'ubuntu-latest' && matrix.perl == 'latest'
