@@ -59,13 +59,14 @@ die "usage: $0 [PORT]\n"
     unless $port =~ /\A[0-9]+\z/ && $port >= 1 && $port <= 65535;
 
 my $done = AnyEvent->condvar;
+my $active_handle; # Keep this Handle alive until the HTTP request completes.
 my $connection = tcp_connect '127.0.0.1', $port, sub {
     my ($socket) = @_;
     die "could not connect: $!\n" unless $socket;
-    my $handle = Local::HTTPClientHandle->new(fh => $socket);
+    $active_handle = Local::HTTPClientHandle->new(fh => $socket);
 
     # APPLICATION CODE: a request uses only HTTP names and callbacks.
-    $handle->{http1}->request(
+    $active_handle->{http1}->request(
         method => 'GET',
         target => '/',
         authority => '127.0.0.1:' . $port,
