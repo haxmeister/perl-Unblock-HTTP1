@@ -109,3 +109,43 @@ Optional before release:
 
 - rerun the HTTP1 standalone benchmarks
 - rerun the Linux::Event comparison diagnostic
+
+## 2026-10-09: Engine embedding API investigation
+
+Development branch: `feature/engine-embedding-api`, created at main commit
+`29e44035fd8c295b1ecc8059c7a20cc3fff54ac1`.
+
+Scope is Unblock::HTTP1 alone. Main and
+`feature/easy-adapter-api` are not to be merged or changed automatically.
+
+The released 0.10 Client/Server API uses `input()`, `input_eof()`,
+`want_write()`, and `output()`. Transactions already expose
+`respond()`, `write()`, `end()`, `send_informational()`, and lifecycle
+accessors. The input-side NativeABI v1 and Uniform::HTTP 0.06 native fast
+path must stay intact.
+
+The older experiment is 96 commits ahead of main and contains:
+- Named-fields construction in Transaction->respond(), informational
+  responses, and Client->request().
+- Optional transport write/close dispatch, transport backpressure and
+  drain(), EOF/error helpers, and delayed response output.
+- Examples and test files t/50 and t/51.
+
+Architectural issues to address before selective reuse:
+- Avoid transport/framework connection ownership cycles. In particular,
+  a framework object that owns HTTP must not also be strongly owned by HTTP.
+- Define *full acceptance* of outgoing bytes and distinguish congestion
+  from partial/rejected writes.
+- Distinguish graceful close after queued output from fatal abort.
+- Protect output delivery from callback reentrancy.
+- Guarantee handshake output ordering relative to on_switch and remainder
+  handoff, including native borrowed-input delivery.
+- Clarify EOF and half-close behavior while a delayed response is pending.
+- Retain manual output/native interfaces without permitting mixed ownership.
+- Examples should favor framework-native integration classes rather than
+  making applications build ad-hoc transport wrappers.
+
+Phase 1 investigation completed. The proposed compact host/embedding
+contract and any breaking changes are awaiting user approval.
+No engine code has yet been changed, and no tests have yet been run.
+Handoff.md is repository-only and must remain outside MANIFEST.
