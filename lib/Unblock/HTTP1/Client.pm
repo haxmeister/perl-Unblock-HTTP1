@@ -5,6 +5,7 @@ use warnings;
 use Carp qw(croak);
 use parent 'Unblock::HTTP1::_Engine';
 
+use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 use Unblock::HTTP1::_Native ();
 use Unblock::HTTP1::_Wire ();
@@ -24,9 +25,34 @@ sub new {
 }
 
 sub request {
-    my ($self, $request, %option) = @_;
+    my ($self, @arg) = @_;
     croak 'request(): connection is closed' if $self->{closed};
     croak 'request(): connection has switched protocols' if $self->{switched};
+    croak 'request(): read side is at EOF' if $self->{eof};
+
+    my ($request, %option);
+    if (@arg && ref($arg[0])) {
+        $request = shift @arg;
+        croak 'request(): options must be key/value pairs' if @arg % 2;
+        %option = @arg;
+    } else {
+        croak 'request(): request fields must be key/value pairs' if @arg % 2;
+        my %field = @arg;
+        for my $name (qw(
+            stream_body
+            on_informational
+            on_response
+            on_body
+            on_complete
+            on_error
+            on_switch
+            on_drain
+        )) {
+            $option{$name} = delete $field{$name} if exists $field{$name};
+        }
+        $request = Uniform::HTTP::Request->new(%field);
+    }
+
     croak 'request(): requires a Uniform HTTP request object'
         unless ref($request) && $request->can('method') && $request->can('target')
             && $request->can('header_count') && $request->can('has_buffered_body');
@@ -206,10 +232,13 @@ sub _drive {
                 $self->{rx} = undef;
                 $self->_mark_switched;
                 $self->_fail_queued('HTTP/1 connection switched protocols');
-                my $switch_cb = $tx->_invoke('on_switch', $response);
                 $self->{active} = undef;
-                return $self->_connection_error($switch_cb) unless $switch_cb eq '1';
-                return;
+                if ($self->{transport_attached}) {
+                    $self->{switch_notice} = [ $tx, $response ];
+                    $self->_transport_sync;
+                    return;
+                }
+                return $self->_deliver_switch_notice($tx, $response);
             }
 
             if ($plan->{mode} eq 'none') {
@@ -379,12 +408,14 @@ sub _retire_if_done {
         $self->_input_clear;
         $self->{closed} = 1;
         $self->_fail_queued('unexpected bytes after final HTTP/1 response');
+        $self->_transport_sync;
         return;
     }
 
     if (!$keep) {
         $self->{closed} = 1;
         $self->_fail_queued('HTTP/1 connection is not reusable');
+        $self->_transport_sync;
         return;
     }
     $self->_start_next;
@@ -419,10 +450,18 @@ sub _transaction_write {
         croak 'write(): invalid streaming request framing mode';
     }
 
+    $self->_retire_if_done if $tx->{local_done};
+    $self->_transport_sync;
     my $ok = $self->_stream_ok;
     $tx->{blocked} = 1 unless $ok;
-    $self->_retire_if_done if $tx->{local_done};
     return $ok;
+}
+
+sub _deliver_switch_notice {
+    my ($self, $tx, $response) = @_;
+    my $result = $tx->_invoke('on_switch', $response);
+    $self->_connection_error($result) unless $result eq '1';
+    return;
 }
 
 sub _transaction_respond { croak 'respond(): client Transactions cannot send responses' }
@@ -436,6 +475,8 @@ sub _transaction_cancel {
     $self->{active} = undef if $self->{active} && $self->{active} == $tx;
     $self->{closed} = 1;
     $self->_fail_queued('HTTP/1 connection closed after cancellation');
+    $self->_transport_abort('HTTP/1 transaction cancelled')
+        if $self->{transport_attached};
     return;
 }
 
@@ -485,6 +526,7 @@ sub _connection_error {
     $self->{rx} = undef;
     $self->{closed} = 1;
     $self->_fail_queued($error);
+    $self->_transport_abort($error) if $self->{transport_attached};
     return;
 }
 
