@@ -21,7 +21,16 @@ Incoming bytes use:
 
     $engine->input($bytes);
 
-Outgoing bytes use:
+The preferred output path uses a weakly referenced host attached at
+Client/Server construction. The engine calls the host's unblock_send($bytes)
+when wire output is produced. There is no polling or manual output pump.
+
+The host must fully accept each offered buffer into its own output queue.
+Its return value reports congestion; resume_output() notifies the engine
+when the host can accept more output. unblock_finish() is graceful after
+queued bytes, while unblock_abort($reason) is fatal.
+
+The original manual interface remains available WITHOUT an attached host:
 
     while ($engine->want_write) {
         my $bytes = $engine->output;
@@ -29,8 +38,9 @@ Outgoing bytes use:
     }
 
 want_read() says whether the engine is still accepting HTTP bytes. input_eof()
-is an explicit transport event because a legal HTTP/1 response can use
-connection close as its message-body delimiter.
+is an explicit read-side event; a complete request may still receive a
+delayed response after EOF. Some response bodies use EOF as a delimiter.
+The host cannot own both automatic output and manual output drains.
 
 ## Messages
 
@@ -155,9 +165,10 @@ finishes with end().
 The common transaction lifecycle vocabulary is state(), error(), is_complete(),
 is_cancelled(), is_error(), and is_terminal().
 
-write() accepts the supplied bytes. Its boolean return reports whether the
-engine output queue is below the cooperative high-water mark. When a blocked
-queue falls below the low-water mark, on_drain fires.
+write() accepts the supplied bytes. Its boolean return reports whether
+either the host has announced congestion or the engine output queue has
+crossed the cooperative high-water mark. After resume_output() clears host
+congestion and the queue drains below the low-water mark, on_drain fires.
 
 ## Request ordering
 
@@ -189,9 +200,11 @@ next protocol to use any particular class model.
 
 ## Reentrancy
 
-input(), input_eof(), and output() are not recursively callable from an engine
-callback. Application callbacks may queue response data or body data through
-the Transaction API.
+input() and input_eof() are not recursively callable from an engine callback
+or host unblock_send callback. output() is manual-mode only and cannot run
+recursively from an engine callback. HTTP application callbacks may queue
+response data or body data through the Transaction API. A host send callback
+must not recursively generate HTTP output.
 
 ## Performance direction
 
