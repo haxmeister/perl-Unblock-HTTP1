@@ -94,9 +94,13 @@ Client: examples/io-async-client.pl
 
 Each defines a subclass of IO::Async::Stream.
 
-The server uses IO::Async::Listener with handle_class and on_accept so that
-the accepted framework stream can be an instance of that subclass. The client
-uses IO::Async::Loop->connect and wraps the connected socket in its subclass.
+The server's on_accept callback constructs its Stream subclass from the
+accepted socket, then adds the stream to the event loop. The application
+callback is defined separately so it is not nested inside the constructor.
+
+The subclass constructs its own HTTP engine in new(). There is no separate
+attach_http() call or transport wrapper. The client follows the same pattern
+after IO::Async::Loop->connect returns a connected socket.
 
 Both implement unblock_send with the framework's write() method and implement
 unblock_finish with close_when_empty(). The examples do not expose framework
