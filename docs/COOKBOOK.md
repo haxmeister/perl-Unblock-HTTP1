@@ -17,6 +17,12 @@ or:
     perl examples/anyevent-server.pl
     perl examples/anyevent-client.pl
 
+The Linux-only server example uses Linux::Event:
+
+    perl examples/linux-event-server.pl
+
+Use curl to request a response from the Linux::Event server.
+
 Servers listen on port 8080 unless you supply another port argument. Clients
 connect to 127.0.0.1 on that port.
 
@@ -117,6 +123,27 @@ for AnyEvent's on_drain before destroying the Handle.
 
 The server maintains active Handle references until each connection closes.
 The HTTP engine holds a weak pointer back to its Handle.
+
+## Linux::Event
+
+Server: examples/linux-event-server.pl
+
+The class Example::HTTPStream subclasses Linux::Event::IO::Sock::Stream.
+It creates its HTTP engine in new(), then maps on_data, on_eof,
+on_error and on_drain to the corresponding engine operations.
+
+The three unblock_* methods map to write(), end() and close().
+Linux::Event write() accepts queued bytes even when it returns false
+for congestion. If a hard output limit closes the stream, the adapter
+throws rather than claiming the bytes were accepted.
+
+Example::HelloHTTPStream implements on_http_request() with ordinary
+application logic. The Linux::Event Listener creates instances of
+that subclass using its stream => { class => ... } recipe.
+The example shows plain HTTP only, not Upgrade/CONNECT handoff.
+
+Linux::Event is optional and Linux-only. Unblock::HTTP1 itself remains
+event-loop and operating-system neutral.
 
 ## Delayed responses
 
