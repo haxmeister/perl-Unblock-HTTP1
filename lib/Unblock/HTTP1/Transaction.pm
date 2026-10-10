@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(weaken);
+use Uniform::HTTP::Response;
 
 our $VERSION = '0.10';
 
@@ -49,16 +50,43 @@ sub end {
 }
 
 sub respond {
-    my ($self, $response, %option) = @_;
+    my ($self, @arg) = @_;
     croak 'respond(): Transaction is terminal' if $self->is_terminal;
     my $owner = $self->{owner} or croak 'respond(): HTTP/1 connection is gone';
+
+    my ($response, %option);
+    if (@arg && ref($arg[0])) {
+        $response = shift @arg;
+        croak 'respond(): options must be key/value pairs' if @arg % 2;
+        %option = @arg;
+    } else {
+        croak 'respond(): response fields must be key/value pairs' if @arg % 2;
+        my %field = @arg;
+        for my $name (qw(stream_body on_drain)) {
+            $option{$name} = delete $field{$name} if exists $field{$name};
+        }
+        $response = Uniform::HTTP::Response->new(%field);
+    }
+
     return $owner->_transaction_respond($self, $response, %option);
 }
 
 sub send_informational {
-    my ($self, $response) = @_;
+    my ($self, @arg) = @_;
     croak 'send_informational(): Transaction is terminal' if $self->is_terminal;
     my $owner = $self->{owner} or croak 'send_informational(): HTTP/1 connection is gone';
+
+    my $response;
+    if (@arg && ref($arg[0])) {
+        croak 'send_informational(): response object does not take options'
+            unless @arg == 1;
+        $response = $arg[0];
+    } else {
+        croak 'send_informational(): response fields must be key/value pairs'
+            if @arg % 2;
+        $response = Uniform::HTTP::Response->new(@arg);
+    }
+
     return $owner->_transaction_informational($self, $response);
 }
 
