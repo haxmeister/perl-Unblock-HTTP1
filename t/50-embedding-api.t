@@ -222,4 +222,27 @@ subtest 'dropped host is treated as transport failure' => sub {
     ok($server->is_closed, 'weak host no longer exists; engine closes');
 };
 
+
+subtest 'pipelined requests preserve ordering through host output' => sub {
+    my $host = Local::Host->new;
+    my @seen;
+    my $server = Unblock::HTTP1::Server->new(
+        transport => $host,
+        on_request => sub {
+            my ($tx, $request) = @_;
+            push @seen, $request->target;
+            $tx->respond(status => 200, body => $request->target);
+        },
+    );
+    my $wire = "GET /one HTTP/1.1\r\nHost: example.test\r\n\r\n"
+        . "GET /two HTTP/1.1\r\nHost: example.test\r\n\r\n";
+    $server->input($wire);
+    is_deeply(\@seen, [qw(/one /two)], 'requests delivered in order');
+    my @status = $host->{bytes} =~ /HTTP\/1\.1 200 OK/g;
+    is(scalar @status, 2, 'two responses handed to host');
+    like($host->{bytes}, qr/\/oneHTTP\/1\.1 200 OK/s,
+        'response boundaries stay ordered');
+    is($host->{writes}, 1, 'parser coalesces response output on read');
+};
+
 done_testing;
