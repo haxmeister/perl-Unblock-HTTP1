@@ -1,0 +1,50 @@
+name: benchmark-embedding
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/engine-embedding-api
+    paths:
+      - 'bench/embedding-overhead.pl'
+      - 'lib/Unblock/HTTP1/**'
+      - '.github/workflows/benchmark-embedding.yml'
+
+jobs:
+  before-after:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+      - name: Check out released main baseline
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: baseline
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+      - name: Install dependencies
+        run: |
+          cpanm --notest Uniform::HTTP@0.06
+          cpanm --notest --installdeps ./candidate
+      - name: Build baseline and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for directory in baseline candidate; do
+            (cd "$directory" && perl Makefile.PL && make)
+          done
+      - name: Compare throughput on one runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'BASELINE main manual'
+          (cd baseline && perl -Mblib ../candidate/bench/embedding-overhead.pl manual 100000)
+          echo 'CANDIDATE manual'
+          (cd candidate && perl -Mblib bench/embedding-overhead.pl manual 100000)
+          echo 'CANDIDATE attached'
+          (cd candidate && perl -Mblib bench/embedding-overhead.pl attached 100000)
