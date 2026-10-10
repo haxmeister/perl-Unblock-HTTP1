@@ -399,7 +399,13 @@ sub _retire_if_done {
 sub _deliver_switch_notice {
     my ($self, $tx, $response) = @_;
     my $cb = $self->_invoke_server('on_switch', $tx, $response);
-    $self->_application_error($cb) unless $cb eq '1';
+    if ($cb ne '1') {
+        if ($self->{transport_attached}) {
+            $self->_transport_abort($cb);
+        } else {
+            $self->_application_error($cb);
+        }
+    }
     return;
 }
 
