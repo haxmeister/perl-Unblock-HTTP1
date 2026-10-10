@@ -236,3 +236,8 @@ application nesting in the IO::Async examples.
 - No changes to the engine API were needed; the weak transport contract is
   unchanged. Optional framework examples remain covered by framework-examples
   CI. Verify the latest push run before a merge or release.
+
+- Follow-up cleanup: all four standalone IO::Async/AnyEvent example files
+  now use ordinary package declarations with an explicit package main before
+  application code. No unnecessary braces or artificial indentation around
+  package definitions. Engine and callback APIs are unchanged.
