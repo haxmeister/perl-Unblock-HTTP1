@@ -185,18 +185,10 @@ subtest 'recursive input from host send is rejected and aborted' => sub {
 subtest '101 switch fires after handshake is accepted, with remainder' => sub {
     my $host = Local::Host->new(returns => [ 0, undef ]);
     my @events;
+    my $pending;
     my $server = Unblock::HTTP1::Server->new(
         transport => $host,
-        on_request => sub {
-            $_[0]->send_informational(status => 103);
-            $_[0]->respond(
-                status => 101,
-                headers => [
-                    [ Connection => 'Upgrade' ],
-                    [ Upgrade => 'test-proto' ],
-                ],
-            );
-        },
+        on_request => sub { $pending = $_[0] },
         on_switch => sub {
             push @events, 'switch';
             like($host->{bytes}, qr/HTTP\/1\.1 101 /,
@@ -204,6 +196,14 @@ subtest '101 switch fires after handshake is accepted, with remainder' => sub {
         },
     );
     $server->input("GET / HTTP/1.1\r\nHost: example.test\r\nConnection: Upgrade\r\nUpgrade: test-proto\r\n\r\nTAIL");
+    $pending->send_informational(status => 103);
+    $pending->respond(
+        status => 101,
+        headers => [
+            [ Connection => 'Upgrade' ],
+            [ Upgrade => 'test-proto' ],
+        ],
+    );
     is_deeply(\@events, [], 'pending handshake delays callback');
     ok($server->is_switched, 'HTTP parsing has stopped');
     is($server->take_remainder, 'TAIL', 'post-upgrade bytes preserved');
