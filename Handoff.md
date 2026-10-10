@@ -217,3 +217,22 @@ CI/progress:
 - Repeat benchmarks on an idle, fixed host before drawing fine-grained
   performance conclusions.
 - No versions were bumped, no releases tagged, and main was untouched.
+
+## 2026-10-09: Approved IO::Async example simplification
+
+The user approved removing the attach_http() initialization step and reducing
+application nesting in the IO::Async examples.
+
+- examples/io-async-server.pl now subclasses IO::Async::Stream with new()
+  creating its Unblock::HTTP1::Server using transport => $self. The on_read,
+  on_read_error and on_write_error events are subclass methods. The application
+  defines $on_request separately. Listener on_accept first constructs a
+  My::HTTPStream from the socket and then adds it to the loop; it does not
+  nest callback definitions or object construction inside $loop->add().
+- examples/io-async-client.pl follows the same constructor-owned engine
+  pattern without attach_http(). HTTP callbacks are defined at application
+  level, and the connected stream is separately constructed and added.
+- docs/COOKBOOK.md describes the simplified construction.
+- No changes to the engine API were needed; the weak transport contract is
+  unchanged. Optional framework examples remain covered by framework-examples
+  CI. Verify the latest push run before a merge or release.
