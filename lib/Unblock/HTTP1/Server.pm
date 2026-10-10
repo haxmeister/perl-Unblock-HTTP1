@@ -55,7 +55,7 @@ sub _input_native_head {
         $status = $self->{closed} ? 3 : $self->{switched} ? 4 : 0;
         $ready = $self->_borrowed_native_head_ready;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return ($status, $ready);
 }
 
@@ -306,7 +306,7 @@ sub _transaction_respond {
         $tx->{keep_alive} = $plan->{keep_alive} ? 1 : 0;
         $self->_retire_if_done;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     return $tx;
 }
 
@@ -359,7 +359,7 @@ sub _transaction_write {
         $tx->{keep_alive} = $plan->{keep_alive} ? 1 : 0;
         $self->_retire_if_done;
     }
-    $self->_transport_sync;
+    $self->_transport_sync if $self->{transport_attached};
     my $ok = $self->_stream_ok;
     $tx->{blocked} = 1 unless $ok;
     return $ok;
@@ -376,7 +376,7 @@ sub _retire_if_done {
         $self->{active} = undef;
         if ($self->{transport_attached}) {
             $self->{switch_notice} = [ $tx, $response ];
-            $self->_transport_sync;
+            $self->_transport_sync if $self->{transport_attached};
             return;
         }
         return $self->_deliver_switch_notice($tx, $response);
@@ -387,7 +387,7 @@ sub _retire_if_done {
     $self->{active} = undef;
     if (!$keep || $self->{eof}) {
         $self->{closed} = 1;
-        $self->_transport_sync;
+        $self->_transport_sync if $self->{transport_attached};
         return;
     }
     return if $self->{driving};
