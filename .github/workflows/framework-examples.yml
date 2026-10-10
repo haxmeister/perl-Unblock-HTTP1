@@ -56,7 +56,7 @@ jobs:
             echo "${framework}: server/client smoke passed"
           done
 
-linux-event-smoke:
+  linux-event-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
