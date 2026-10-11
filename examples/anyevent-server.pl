@@ -5,7 +5,6 @@ use warnings;
 use AnyEvent;
 use AnyEvent::Handle;
 use AnyEvent::Socket qw(tcp_server);
-use Scalar::Util qw(refaddr);
 use Unblock::HTTP1::Server;
 
 # ADAPTER CODE: the Handle subclass owns HTTP protocol state.
