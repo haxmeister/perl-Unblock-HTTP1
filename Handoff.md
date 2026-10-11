@@ -279,3 +279,41 @@ Release audit work on main:
 No 0.11 tag, GitHub release, or CPAN upload has been made.
 Review latest main CI after final audit edits. Performance benchmarks on hosted
 runners are provisional; the portable engine fast path remains available.
+
+
+## 2026-10-10: Final v0.11 release audit
+
+The user requested a thorough release audit on main. No release, tag, or CPAN
+upload has been authorized yet. The most recent published tag remains v0.10.
+
+Audit scope:
+- Public 0.11 Perl module versions: Unblock::HTTP1, Client, Server,
+  Transaction, Integration; NativeABI inherits the distribution version.
+- Native borrowed-input ABI remains version 1 and retains the v1 public
+  installed header, without changes to its layout or operations.
+- Makefile.PL still requires Perl 5.16 and Uniform::HTTP 0.06. IO::Async,
+  AnyEvent, and Linux::Event are optional integration-example dependencies.
+- MANIFEST contains all public modules, shipped header, cookbook, integration
+  documentation, five runnable examples, and regression tests t/50 and t/51.
+- MANIFEST.SKIP excludes Handoff.md and internal/unshipped development docs.
+- README, root POD, Client/Server/Transaction/Integration POD, cookbook, and
+  Changes have been reviewed for the new attached transport API.
+- Main test workflow checks Linux 5.16, Linux latest, macOS, Windows, public
+  POD syntax, distcheck and disttest. Framework examples workflow smoke-tests
+  IO::Async/AnyEvent client/server pairs and Linux::Event server with curl.
+
+Fixes applied during this audit:
+- Clarified server-specific input_eof() and client-specific EOF response
+  framing language in their respective POD sections.
+- Reworded the README version requirement so it remains correct at release.
+- Added a t/01-version.t assertion distinguishing distribution version 0.11
+  from native input ABI v1.
+- Removed the redundant Scalar::Util import from the AnyEvent example.
+- No parser, serialization, lifecycle, XS, or native ABI semantics changed.
+
+Before publishing, check the final test and framework-examples workflow runs
+on the current main HEAD; earlier audit revisions were green on all supported
+platforms. The v0.10/manual versus v0.11/manual-and-attached benchmark recorded
+a small but nonzero regression on a shared GitHub runner; use controlled
+repeat runs before presenting definitive performance numbers. There is no
+evidence that an ABI version bump would be warranted by the new embedding API.
