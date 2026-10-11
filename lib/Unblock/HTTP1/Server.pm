@@ -800,8 +800,8 @@ Do not call C<input()> recursively from an HTTP callback.
     $server->input_eof;
 
 Reports a clean read-side EOF. Unlike a transport error, a fully received
-request may still receive a delayed response after EOF. EOF also delimits
-some client response bodies. Do not use C<input('')> as EOF.
+request may still receive a delayed response after EOF. An incomplete request
+at EOF is handled as an HTTP framing error. Do not use C<input('')> as EOF.
 
 =head2 transport_error
 
