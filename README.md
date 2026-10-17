@@ -1,5 +1,9 @@
 # Unblock::HTTP1
 
+Development branch: `feature/unified-receive-lifecycle` adds bounded receive
+buffers and transaction `on_data` / `on_finish` callbacks. These changes are
+not released. See `Handoff.md` for validation and continuation instructions.
+
 [![Tests](https://github.com/haxmeister/perl-Unblock-HTTP1/actions/workflows/test.yml/badge.svg)](https://github.com/haxmeister/perl-Unblock-HTTP1/actions/workflows/test.yml)
 [![CPAN](https://img.shields.io/cpan/v/Unblock-HTTP1.svg)](https://metacpan.org/release/Unblock-HTTP1)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
