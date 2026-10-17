@@ -3,7 +3,7 @@
 Updated: 2026-10-17
 Repository: haxmeister/perl-Unblock-HTTP1
 Branch: feature/unified-receive-lifecycle
-Status: implementation checkpoint, not release ready.
+Status: receive/lifecycle implementation passes full CI; not a release candidate.
 
 The maintainer explicitly authorized changes to HTTP1, HTTP2, HTTP3 and
 perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed publication of these
@@ -37,8 +37,8 @@ unchanged; this is a coordinated development branch, not a CPAN release.
 1. Check git status/branch and inspect the diff; main must remain unchanged.
 2. Local source/POD review and focused tests are complete; inspect the recorded
    validation limits before continuing with CI.
-3. Publish these authorized dependency feature branches and verify remote trees.
-4. Run full GitHub CI, fix failures, and record exact commit/run IDs here.
+3. Feature branch is published, tree verified and full CI passed (see below).
+4. Coordinate remaining H3/unified verification using the upper handoff.
 5. Update upper-layer CI pins to the published engine commits and run live
    Unblock::HTTP integration. Upper Server now maps on_headers to engine
    on_request and application on_request to engine on_request_end.
@@ -366,3 +366,16 @@ platforms. The v0.10/manual versus v0.11/manual-and-attached benchmark recorded
 a small but nonzero regression on a shared GitHub runner; use controlled
 repeat runs before presenting definitive performance numbers. There is no
 evidence that an ABI version bump would be warranted by the new embedding API.
+
+## Verified feature publication
+
+Source commit: 82dfc4bf691001aff50f96bb7a92e6fce3fbb229
+Full CI: https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/39058702399
+PASS on Linux Perl 5.16/latest, macOS latest, Windows Strawberry 5.40.
+Distribution/POD checks passed.
+Additional framework examples CI: https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/39058702329
+PASS. Upper CI pins the tested source commit; subsequent handoff-only updates
+do not require changing that pin. Main remains unchanged.
+
+The coordinated milestone still awaits the corrected H3 full suite and updated
+upper live QUIC test. Consult perl-Unblock-HTTP/Handoff.md for current status.
