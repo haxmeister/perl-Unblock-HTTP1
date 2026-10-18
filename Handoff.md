@@ -32,6 +32,35 @@ bodies, overflow, truncation, and callback cancellation/exception ordering.
 No performance or zero-copy improvement is claimed. Version numbers are
 unchanged; this is a coordinated development branch, not a CPAN release.
 
+## Attached output acceptance before terminal completion (2026-10-17)
+
+Coordinated upper hard-output-limit CI 39086673892 exposed a real H1
+completion ordering issue, while H2 passed: when a 2 MiB buffered
+response is assembled during input(), the H1 transaction calls
+on_finish(state=complete) before the attached host has accepted the
+actual output. LinuxEvent immediately rejects the output due to
+max_pending_bytes=4096 and reports a fatal structured output_limit,
+but H1 cannot change the already-dispatched terminal callback.
+The client does NOT receive a complete response, and H2 marks error.
+
+Approved contract: on_finish exactly once after terminal state; a
+failed host send is an error, not successful local output acceptance.
+A stream write returning false due ordinary congestion remains accepted,
+whereas a fatal host error aborts without replay. We will defer attached
+H1 completion only until all engine output belonging to that response
+is transferred to the host's unblock_send(), not until network delivery.
+Manual output() engines retain their existing application completion
+timing. Preserve H1 pipelining, native borrowed input, switching and
+reentrant callbacks. No aliases or ABI changes.
+
+Plan: guard Server::_retire_if_done when attached output remains;
+perform deferred retirement after the transport successfully accepts
+queued bytes, including after resume_output. Add standalone tests for
+synchronous rejecting host and a normal accepted-but-blocked host and
+pipelined requests, run full H1 CI; then pin the verified H1 feature
+source SHA in upper workflow and validate real hard-cap H1/H2 test.
+No main, merge, tag, release, version bump, or unrelated dependency edits.
+
 ## Resume
 
 1. Check git status/branch and inspect the diff; main must remain unchanged.
