@@ -368,25 +368,17 @@ sub _transaction_write {
     return $ok;
 }
 
-# Attached output must be accepted by the host before the server
-# Transaction becomes terminal. A false return from unblock_send means
-# the complete bytes were accepted but output is blocked; a thrown send
-# fails the active Transaction. No wait for kernel/peer consumption.
+# Keep HTTP/1 pipelined response construction batched while preserving
+# exactly-once terminal callbacks. A local response is not successfully
+# complete until its complete output was accepted by the attached host.
 sub _transport_sync {
     my ($self) = @_;
-    return if $self->{retiring_after_transport_sync};
-    local $self->{retiring_after_transport_sync} = 1;
-    while (1) {
-        $self->SUPER::_transport_sync;
-        last if $self->{transport_aborted} || $self->{driving};
-        my $tx = $self->{active} or last;
-        last unless $tx->{local_done} && $tx->{remote_done}
-            && !$tx->{switch_pending} && !length($self->{output});
-        $self->_retire_if_done;
-        last if $self->{active} && $self->{active} == $tx;
-        # Retiring a response can release a pipelined request; flush any
-        # output that its callback just generated before retiring that one.
-        last unless length($self->{output});
+    $self->SUPER::_transport_sync;
+    return if $self->{transport_aborted} || length($self->{output});
+    my $pending = delete $self->{pending_host_finishes} or return;
+    for my $tx (@$pending) {
+        $tx->_mark_complete unless $tx->is_terminal;
+        $tx->_notify_finish;
     }
     return;
 }
@@ -396,12 +388,6 @@ sub _retire_if_done {
     my $tx = $self->{active} or return;
     return if $self->{completing_request};
     return unless $tx->{local_done} && $tx->{remote_done};
-    # An attached response still held by the engine may be rejected by
-    # the host. Do not notify successful on_finish before its ownership
-    # has transferred. Protocol switches keep their separate handshake
-    # boundary and on_switch notification semantics.
-    return if $self->{transport_attached} && !$tx->{switch_pending}
-        && length($self->{output});
     if ($tx->{switch_pending}) {
         $tx->_mark_complete unless $tx->is_terminal;
         my $response = $tx->response;
@@ -414,11 +400,19 @@ sub _retire_if_done {
         }
         return $self->_deliver_switch_notice($tx, $response);
     }
-    $tx->_mark_complete unless $tx->is_terminal;
+    # The HTTP/1 parser can finish several pipelined requests during one
+    # input call. Retire them from parsing now, but hold their terminal
+    # observers until the whole coalesced output is accepted by the host.
+    my $await_host = $self->{transport_attached} && length($self->{output});
+    if ($await_host) {
+        push @{ $self->{pending_host_finishes} //= [] }, $tx;
+    } else {
+        $tx->_mark_complete unless $tx->is_terminal;
+    }
     my $keep = $tx->{keep_alive};
     $keep = $tx->{request_keep_alive} unless defined $keep;
     $self->{active} = undef;
-    $tx->_notify_finish;
+    $tx->_notify_finish unless $await_host;
     if (!$keep || $self->{eof}) {
         $self->{closed} = 1;
         $self->_transport_sync if $self->{transport_attached};
@@ -567,8 +561,11 @@ sub _fail_all {
     $tx->_fail($error) if $tx && !$tx->is_terminal;
     $self->{rx} = undef;
     $self->_input_clear;
+    my $pending = delete $self->{pending_host_finishes} || [];
+    $_->_fail($error) for grep { !$_->is_terminal } @$pending;
     $self->_invoke_server('on_error', $tx, $error) unless $self->{cancelling};
     $tx->_notify_finish if $tx;
+    $_->_notify_finish for @$pending;
     return;
 }
 
