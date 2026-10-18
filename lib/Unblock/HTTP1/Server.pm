@@ -910,6 +910,19 @@ value (meaning complete acceptance followed by congestion). The host must
 call this again when it can accept more output. It can trigger a streaming
 Transaction's C<on_drain> callback.
 
+A fatal host write error is B<not> ordinary congestion. A transport such
+as Linux::Event may close itself on an output hard-limit violation.
+The host adapter must report the error to the engine (or throw from
+C<unblock_send()>); it must not return false as though the rejected bytes
+were accepted, nor call C<resume_output()> for that rejected output.
+
+With an attached host, normal server transaction C<on_finish> success waits
+until all its outgoing HTTP bytes have been accepted by the host, including
+batched pipelined responses. If the host rejects that queued output, the
+pending Transactions finish with error instead. Acceptance means ownership
+transfer to the host, not that the remote peer has received the bytes.
+Manual C<output()> use retains its original local-completion timing.
+
 An output-queueing host that always returns undef does not need it.
 
 =head1 CONNECTION STATE
