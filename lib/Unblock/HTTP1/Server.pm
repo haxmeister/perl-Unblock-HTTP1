@@ -368,11 +368,40 @@ sub _transaction_write {
     return $ok;
 }
 
+# Attached output must be accepted by the host before the server
+# Transaction becomes terminal. A false return from unblock_send means
+# the complete bytes were accepted but output is blocked; a thrown send
+# fails the active Transaction. No wait for kernel/peer consumption.
+sub _transport_sync {
+    my ($self) = @_;
+    return if $self->{retiring_after_transport_sync};
+    local $self->{retiring_after_transport_sync} = 1;
+    while (1) {
+        $self->SUPER::_transport_sync;
+        last if $self->{transport_aborted} || $self->{driving};
+        my $tx = $self->{active} or last;
+        last unless $tx->{local_done} && $tx->{remote_done}
+            && !$tx->{switch_pending} && !length($self->{output});
+        $self->_retire_if_done;
+        last if $self->{active} && $self->{active} == $tx;
+        # Retiring a response can release a pipelined request; flush any
+        # output that its callback just generated before retiring that one.
+        last unless length($self->{output});
+    }
+    return;
+}
+
 sub _retire_if_done {
     my ($self) = @_;
     my $tx = $self->{active} or return;
     return if $self->{completing_request};
     return unless $tx->{local_done} && $tx->{remote_done};
+    # An attached response still held by the engine may be rejected by
+    # the host. Do not notify successful on_finish before its ownership
+    # has transferred. Protocol switches keep their separate handshake
+    # boundary and on_switch notification semantics.
+    return if $self->{transport_attached} && !$tx->{switch_pending}
+        && length($self->{output});
     if ($tx->{switch_pending}) {
         $tx->_mark_complete unless $tx->is_terminal;
         my $response = $tx->response;
