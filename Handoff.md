@@ -59,6 +59,30 @@ queued bytes, including after resume_output. Add standalone tests for
 synchronous rejecting host and a normal accepted-but-blocked host and
 pipelined requests, run full H1 CI; then pin the verified H1 feature
 source SHA in upper workflow and validate real hard-cap H1/H2 test.
+Implementation and validation:
+- Server.pm now queues locally completed attached Transactions while the
+  output bytes remain in the engine. Pipelined HTTP/1 output is still
+  coalesced; _transport_sync commits queued terminal callbacks only
+  after the complete batch has been accepted by unblock_send(). A
+  thrown host send fails every pending Transaction before on_finish.
+  A false host return remains successful acceptance plus congestion.
+- A first naive transport-retirement gate failed old
+  t/50-embedding-api.t subtests for graceful close and coalescing.
+  It was replaced rather than weakening those regressions. Pipelining,
+  manual output and graceful close retain the original behavior.
+- New t/53-attached-output-completion.t covers rejecting hosts,
+  accepted-but-blocked whole writes, pipelining order/coalescing, and
+  unchanged manual mode. MANIFEST updated. No ABI layout change.
+- Production source: 783e2a951dafac2756ba2c3cf34ea35fc043de6f.
+  H1 full matrix run 39087355734 PASS on Linux Perl 5.16/latest,
+  macOS/latest and Windows Strawberry 5.40. Linux latest reports
+  37 files/324 checks, and distribution tests also PASS.
+  Framework example CI 39087355806 PASS.
+- Subsequent H1 edits are documentation/this handoff only, and
+  upper integration pins the verified production source commit.
+  The upper hard-cap regression must pass separately before claiming
+  the coordinated boundary verified.
+
 No main, merge, tag, release, version bump, or unrelated dependency edits.
 
 ## Resume
