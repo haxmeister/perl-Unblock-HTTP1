@@ -1,3 +1,13 @@
+## Unblock::HTTP1 0.12 feature-branch release candidate (2026-10-21)
+
+The maintainer has now requested coordinated bumped versions and release
+preparation. All indexed literal package versions are updated to 0.12 on
+feature/unified-receive-lifecycle; dynamic NativeABI/_Native versions
+continue to use the parent package version. Changelog covers the
+verified receive/lifecycle and attached-output fixes. A fresh full CI
+and release tarball/version-index audit are required on this commit.
+No main updates, GitHub tags or releases, or CPAN uploads yet.
+
 # Receive body and lifecycle implementation checkpoint
 
 Updated: 2026-10-17
