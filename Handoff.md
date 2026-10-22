@@ -5,6 +5,47 @@ Current branch: main
 Integrated development branch: feature/unified-receive-lifecycle
 Fast-forward merge checkpoint: a976f169cd06ecc4cadab74dad1e281b42f57c4b
 
+## 2026-10-21 standalone v0.12 release audit (prepublication)
+
+The HTTP1-only release audit has now examined the merged main-branch
+candidate. The last source/documentation audit commit is
+4b3f3595f9cbb6672fd741f77e0950beab4ed900 (the Handoff-only commit
+recording this audit is not a runtime or packaging change).
+
+Checks:
+- All six public module versions are 0.12 (HTTP1, Client, Server,
+  Transaction, Integration, NativeABI). The internal _Native version
+  inherits the root package version. NativeABI input ABI remains 1 and
+  its structure, result codes, public header and discovery are unchanged.
+- Makefile.PL keeps minimum Perl 5.16 and Uniform::HTTP 0.06; there is
+  no required event framework. The shipped public header is installed.
+- MANIFEST has 66 entries, every entry exists in the repository, and
+  Handoff.md, development docs, benchmarks and workflows remain excluded
+  under MANIFEST.SKIP.
+- Changes has the 2026-10-21 v0.12 entry; t/01-version.t checks
+  public version 0.12 separately from native input ABI version 1.
+- The earlier runtime candidate a976f169cd06ecc4cadab74dad1e281b42f57c4b
+  passed standalone Linux (Perl 5.16/current), macOS, Windows, public
+  POD, distcheck, disttest, and optional IO::Async/AnyEvent/Linux::Event
+  framework CI: runs 39700380828 and 39700380936.
+- Release documentation-only corrections committed to main:
+  7cfa967b19169e145712caba43837143a95a1a77 corrected the stale
+  README feature-branch and 0.11 version notices and documented receive
+  modes; 4b3f3595f9cbb6672fd741f77e0950beab4ed900 expanded the
+  installed Integration POD for on_data/on_finish and buffered receive.
+  The README candidate passed standalone and framework CI in runs
+  39713640585 and 39713640577. The final Integration-POD candidate
+  passed framework CI in run 39713826617. The standalone full matrix,
+  including distcheck/disttest, is run 39713826625: confirm final result
+  before publishing.
+
+No HTTP parser, transaction lifecycle, native XS, ABI, dependency or
+test behavior has been altered during the standalone release audit.
+At the time of this handoff update, v0.11 remains the last public
+GitHub/CPAN release. No v0.12 tag, GitHub release or PAUSE upload was
+performed. Confirm with the maintainer before publication, then verify
+PAUSE indexing for the complete 0.12 package list after upload.
+
 ## Instructions for the next HTTP1-only conversation
 
 The maintainer authorized merging the completed feature branch to MAIN and
