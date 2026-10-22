@@ -36,8 +36,9 @@ Checks:
   The README candidate passed standalone and framework CI in runs
   39713640585 and 39713640577. The final Integration-POD candidate
   passed framework CI in run 39713826617. The standalone full matrix,
-  including distcheck/disttest, is run 39713826625: confirm final result
-  before publishing.
+  including Linux Perl 5.16/current, macOS, Windows, POD, distcheck and
+  disttest, passed in run 39713826625. This source/documentation candidate
+  has completed release-audit CI successfully.
 
 No HTTP parser, transaction lifecycle, native XS, ABI, dependency or
 test behavior has been altered during the standalone release audit.
