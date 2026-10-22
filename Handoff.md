@@ -1,3 +1,70 @@
+# MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP1 0.12
+Updated: 2026-10-21
+Repository: https://github.com/haxmeister/perl-Unblock-HTTP1
+Current branch: main
+Integrated development branch: feature/unified-receive-lifecycle
+Fast-forward merge checkpoint: a976f169cd06ecc4cadab74dad1e281b42f57c4b
+
+## Instructions for the next HTTP1-only conversation
+
+The maintainer authorized merging the completed feature branch to MAIN and
+continuing each library's release work in its own chat. The merge HAS been
+done. MAIN already contains the 0.12 version bump and release-candidate
+Changes entry. The previous public GitHub version was 0.11.
+No GitHub release, tag, or PAUSE upload has been performed for 0.12.
+Any historical restrictions below against touching/merging main or bumping
+versions were for the earlier development phase and are superseded by this
+current state. Finish a standalone 0.12 release audit first; confirm with
+the maintainer before externally publishing the release.
+
+## Implemented architecture and contracts
+
+Unblock::HTTP1 remains a standalone, event-loop-agnostic HTTP/1.1 engine.
+It does NOT embed a Linux::Event adapter or depend on the unified upper
+Unblock::HTTP layer. The coordinated update supports the upper unified
+Client/Server API while remaining directly useful to framework integrators.
+- Bounded buffered-body reception and per-Transaction streamed on_data
+  reception, selected at the caller boundary; a 64 MiB default cap.
+- on_finish exactly once after completed, error, or cancellation,
+  preserving distinction between cancellation and a protocol error.
+- Original engine Transaction and Uniform::HTTP objects are retained;
+  no duplicate parser or unnecessary body materialization.
+- Bodyless, chunked, fixed-length, truncated and overflow cases tested
+  for native/portable paths; callback error ordering specified.
+- Host-attached transport ownership/backpressure and ordered response
+  delivery: a completed transaction cannot be reported as finished before
+  the attached host accepts its output.
+- HTTP/1.1 Upgrade and native borrowed-input remainder remain safe for
+  host-controlled WebSocket consumer handoff; adapter authors transfer
+  unconsumed bytes exactly once. The engine must NOT depend on
+  Unblock::WebSocket or Linux::Event.
+- NativeABI public header and discovery contract are preserved.
+
+## Verified CI and next actions
+
+Version-bumped current MAIN source (pre-handoff a976f169...)
+passed BOTH workflows:
+- Standalone cross-platform suite:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/39694114939
+- Optional framework examples:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/39694114991
+Both PASS. Earlier CI failed only a stale t/01-version.t check expecting
+0.11, which has been corrected on MAIN. The new Handoff-only commit
+does not alter production/test logic.
+
+Next in this HTTP1-specific chat: verify HEAD/main, README, Changes,
+Makefile.PL, MANIFEST, test version assertions, exported module versions,
+NativeABI header/install path, release dependencies and POD/synopsis.
+Build and test a clean 0.12 tarball (disttest) from main, checking that
+PAUSE will index every package version properly. Add release notes as
+needed without breaking the coordinated unified API. Once approved,
+publish/tag 0.12 to GitHub/CPAN and verify its index. No additional
+profiling sweep or new framework adapter is part of this release.
+The higher-level Unblock::HTTP 0.02 requires HTTP1 >= 0.12 and must be
+published only after the required lower distributions are available.
+
+## Historical development records (kept for detail; above is authoritative)
+
 ## Unblock::HTTP1 0.12 feature-branch release candidate (2026-10-21)
 
 The maintainer has now requested coordinated bumped versions and release
