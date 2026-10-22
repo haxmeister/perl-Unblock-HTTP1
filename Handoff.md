@@ -1,11 +1,33 @@
 # MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP1 0.12
-Updated: 2026-10-21
+Updated: 2026-10-21 (post-release confirmation)
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP1
 Current branch: main
 Integrated development branch: feature/unified-receive-lifecycle
 Fast-forward merge checkpoint: a976f169cd06ecc4cadab74dad1e281b42f57c4b
 
-## 2026-10-21 standalone v0.12 release audit (prepublication)
+## Published release: Unblock::HTTP1 v0.12
+
+Status: RELEASED. On 2026-10-21 (America/Chicago), the maintainer
+confirmed publication of Unblock::HTTP1 v0.12 to both GitHub and CPAN.
+
+GitHub independently verified:
+- Published release: https://github.com/haxmeister/perl-Unblock-HTTP1/releases/tag/v0.12
+- Tag: refs/tags/v0.12, pointing to
+  b0a4ecd4a57816da0f319b2f459fdbd52063c435
+- GitHub release published 2026-10-22 03:07:16 UTC.
+
+CPAN publication was confirmed by the maintainer; independent PAUSE /
+MetaCPAN indexing was not yet verifiable at this check (public search
+results still reflected the earlier version). If CPAN indexing status
+is important, inspect the PAUSE indexer report or check live MetaCPAN
+after its update. Do not mistake cached search results for an upload
+failure.
+
+No new release, tag, version bump or additional release audit is pending
+for this HTTP1 distribution. The prepublication audit below is retained
+as history; the next coordinated distribution can now use HTTP1 >= 0.12.
+
+## 2026-10-21 standalone v0.12 release audit (completed before publication)
 
 The HTTP1-only release audit has now examined the merged main-branch
 candidate. The last source/documentation audit commit is
@@ -42,22 +64,17 @@ Checks:
 
 No HTTP parser, transaction lifecycle, native XS, ABI, dependency or
 test behavior has been altered during the standalone release audit.
-At the time of this handoff update, v0.11 remains the last public
-GitHub/CPAN release. No v0.12 tag, GitHub release or PAUSE upload was
-performed. Confirm with the maintainer before publication, then verify
-PAUSE indexing for the complete 0.12 package list after upload.
+At the time of this prepublication audit, v0.11 was still the latest
+public release. This historical release gate has since been completed;
+see "Published release" above.
 
 ## Instructions for the next HTTP1-only conversation
 
-The maintainer authorized merging the completed feature branch to MAIN and
-continuing each library's release work in its own chat. The merge HAS been
-done. MAIN already contains the 0.12 version bump and release-candidate
-Changes entry. The previous public GitHub version was 0.11.
-No GitHub release, tag, or PAUSE upload has been performed for 0.12.
-Any historical restrictions below against touching/merging main or bumping
-versions were for the earlier development phase and are superseded by this
-current state. Finish a standalone 0.12 release audit first; confirm with
-the maintainer before externally publishing the release.
+The maintainer authorized the feature-branch merge and version 0.12
+release; both are now complete. The standalone audit passed before
+publication. See the published-release summary above. The historical
+restrictions and release-prep to-do items below were superseded by the
+completed 0.12 release.
 
 ## Implemented architecture and contracts
 
