@@ -64,3 +64,5 @@ vendor/picohttpparser/UPSTREAM
 t/51-embedding-native.t
 t/52-receive-lifecycle.t
 t/53-attached-output-completion.t
+t/54-server-drain.t
+t/55-native-response.t

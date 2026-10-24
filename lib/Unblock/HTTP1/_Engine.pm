@@ -317,9 +317,15 @@ sub _transport_sync {
     return if $self->{transport_aborted};
     if ($self->{closed} && !length($self->{output}) && !$self->{switched}) {
         $self->{transport_finished} = 1;
-        my $ok = eval { $host->unblock_finish(); 1 };
+        my $ok = eval { $self->_transport_finish($host); 1 };
         $self->_transport_abort("$@" || 'unblock_finish() failed') unless $ok;
     }
+    return;
+}
+
+sub _transport_finish {
+    my ($self, $host) = @_;
+    $host->unblock_finish;
     return;
 }
 

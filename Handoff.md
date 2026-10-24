@@ -1,3 +1,20 @@
+# ACTIVE: Linux::Event integration development
+
+Updated: 2026-10-24 (America/Chicago)
+Branch: feature/linux-event-integration
+
+The user explicitly authorized these upstream changes from the Linux::Event::HTTP
+reconstruction chat. Main, releases, tags and version numbers must remain
+unchanged. Nothing has been pushed. Earlier release instructions below are
+historical and do not authorize publishing this development branch.
+
+Native canonical simple-response serialization and public Server drain are implemented. The full suite passes on Perl 5.38.2 threaded and 5.44.0 non-threaded: 39 files / 346 top-level tests. make disttest also passes on 5.38. The new drain tests cover native/portable partial bodies, pipelined suffix exclusion, congestion, idle/manual mode and synchronous host teardown; serializer parity includes framing fallbacks and thread cloning. Native ABI v1 is unchanged. Complex framing/subclasses retain the general path. No Uniform or Linux::Event source changes.
+
+The coordinating checkout is Linux::Event::HTTP feature/unblock-http-rebuild.
+Keep that handoff current with verified commits and dependency pins.
+
+---
+
 # MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP1 0.12
 Updated: 2026-10-21 (post-release confirmation)
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP1
