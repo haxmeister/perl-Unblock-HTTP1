@@ -5,10 +5,19 @@ Branch: feature/linux-event-integration
 
 The user explicitly authorized these upstream changes from the Linux::Event::HTTP
 reconstruction chat. Main, releases, tags and version numbers must remain
-unchanged. Nothing has been pushed. Earlier release instructions below are
-historical and do not authorize publishing this development branch.
+unchanged. On 2026-10-24 the user authorized feature-branch pushes as needed.
+Main still requires permission. This feature branch is now published.
+Earlier release instructions below remain historical.
 
 Native canonical simple-response serialization and public Server drain are implemented. The full suite passes on Perl 5.38.2 threaded and 5.44.0 non-threaded: 39 files / 346 top-level tests. make disttest also passes on 5.38. The new drain tests cover native/portable partial bodies, pipelined suffix exclusion, congestion, idle/manual mode and synchronous host teardown; serializer parity includes framing fallbacks and thread cloning. Native ABI v1 is unchanged. Complex framing/subclasses retain the general path. No Uniform or Linux::Event source changes.
+
+Published implementation: 1eb332872257087bb13ccde0f74f235c353d6e67.
+The GitHub API publication preserves the exact tested local tree
+857abcc6ec222b24a3a03d183c15875a2866ea9f (formerly local 4cf27f4).
+Full CI PASS: Linux Perl 5.16/latest, macOS/latest and Windows/5.40;
+POD, Linux-current distcheck/disttest and optional framework examples pass.
+- https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40105783566
+- https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40105783602
 
 The coordinating checkout is Linux::Event::HTTP feature/unblock-http-rebuild.
 Keep that handoff current with verified commits and dependency pins.
