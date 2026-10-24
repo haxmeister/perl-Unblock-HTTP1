@@ -324,7 +324,9 @@ sub _transaction_respond {
     $tx->{send_plan} = $plan;
     $tx->{stream_body} = $stream_body;
     $tx->{callbacks}{on_drain} = $on_drain if $on_drain;
-    $self->_queue_output($plan->{wire});
+    # The queue now owns these bytes. A retained Transaction must not keep
+    # a second serialized copy of its canonical response body alive.
+    $self->_queue_output(delete $plan->{wire});
 
     if ($plan->{switch}) {
         $tx->_mark_local_done;

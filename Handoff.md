@@ -9,6 +9,23 @@ unchanged. On 2026-10-24 the user authorized feature-branch pushes as needed.
 Main still requires permission. This feature branch is now published.
 Earlier release instructions below remain historical.
 
+Latest milestone: output ownership / retained-Transaction memory.
+- Server and Client transfer serialized wire bytes out of send_plan into the
+  engine output queue. Retaining a completed Transaction preserves its real
+  Uniform message without retaining a second serialized payload.
+- Empty output batches use copy-on-write scalar assignment; appends still
+  coalesce in order. Streaming framing state remains available.
+- t/56-output-ownership.t covers congested server pipelines, queued client
+  uploads, canonical body retention, and caller mutation after stream writes.
+- Full suite passes on Perl 5.38.2 threaded and 5.44.0 non-threaded:
+  40 files / 349 top-level tests. Linux HTTP both input paths pass on both.
+- Linux HTTP bench/run-unblock-retention.pl holds 256 distinct 256 KiB bodies
+  per process. Three samples: server median RSS delta 133444 -> 67896 KiB;
+  client 133448 -> 67644 KiB. This is retained memory, not peak RSS.
+  The original throughput gap remains open; no release-performance claim.
+- This milestone's remote CI is pending publication. The green CI links below
+  refer to the previous implementation, not this change.
+
 Native canonical simple-response serialization and public Server drain are implemented. The full suite passes on Perl 5.38.2 threaded and 5.44.0 non-threaded: 39 files / 346 top-level tests. make disttest also passes on 5.38. The new drain tests cover native/portable partial bodies, pipelined suffix exclusion, congestion, idle/manual mode and synchronous host teardown; serializer parity includes framing fallbacks and thread cloning. Native ABI v1 is unchanged. Complex framing/subclasses retain the general path. No Uniform or Linux::Event source changes.
 
 Published implementation: 1eb332872257087bb13ccde0f74f235c353d6e67.

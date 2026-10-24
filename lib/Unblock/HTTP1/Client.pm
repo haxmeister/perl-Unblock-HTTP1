@@ -105,7 +105,8 @@ sub _start_next {
     $tx->{send_plan} = $plan;
     $tx->{local_done} = $plan->{body_finalized} ? 1 : 0;
     $self->{active} = $tx;
-    $self->_queue_output($plan->{wire});
+    # Keep framing state, but transfer serialized bytes to the output queue.
+    $self->_queue_output(delete $plan->{wire});
     return;
 }
 

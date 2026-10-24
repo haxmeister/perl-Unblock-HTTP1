@@ -66,3 +66,4 @@ t/52-receive-lifecycle.t
 t/53-attached-output-completion.t
 t/54-server-drain.t
 t/55-native-response.t
+t/56-output-ownership.t
