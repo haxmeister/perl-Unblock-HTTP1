@@ -287,8 +287,15 @@ sub _finish_request {
 sub _complete_request {
     my ($self, $tx, $request) = @_;
     return if $tx->is_terminal;
-    $tx->_finish_receive($request);
-    $request->mark_complete->freeze;
+    if ($tx->{request_body_mode} eq 'none') {
+        # Both trusted head builders (portable FastPath and native ABI)
+        # already deliver a complete, frozen, empty-body Uniform Request.
+        # There can be no receive chunks to materialize in this case.
+        $tx->{receive_done} = 1;
+    } else {
+        $tx->_finish_receive($request);
+        $request->mark_complete->freeze;
+    }
     $tx->_mark_remote_done;
     my $cb;
     {
