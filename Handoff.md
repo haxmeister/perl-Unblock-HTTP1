@@ -1,3 +1,56 @@
+# ACTIVE Stage B bodyless request optimization — 2026-10-25
+
+Current authorized feature branch: feature/linux-event-integration
+Production optimization commit 4d19f59196481ae4460207c5b22c5125fdbfe186.
+Dedicated regression + MANIFEST: a90cfef10ca7eccde941493eaf9ffa520309f271.
+Main untouched at 826fb5733daac62d9f5b51538dffbe1dc189c6d9.
+No merge, tag, version bump or release.
+
+For Server->_complete_request() when request_body_mode is 'none',
+the portable Unblock::HTTP1::_Wire trusted FastPath and the native
+HTTP1.xs uhttp_native_from_validated input both ALREADY construct a
+complete, frozen empty-body Uniform::HTTP::Request. Skip redundant
+Transaction->_finish_receive() (including body_is_mutable()) and the
+Request mark_complete()/freeze() calls for these validated bodyless
+requests; set tx receive_done directly. All body-bearing and
+streamed requests continue their original general lifecycle.
+
+New t/57-bodyless-completion.t checks two pipelined bodyless GETs
+and one buffered POST on one connection: precise Uniform complete/
+mutable/body state, receive_done, three independent 200 outputs,
+terminal notifications exactly once and persistent transport. All
+standalone test workflow 40156227917 PASS Linux Perl 5.16/latest,
+macOS/latest, Windows Strawberry 5.40. Framework examples workflow
+40156227919 PASS, including Linux::Event smoke. Before the test-only
+commit, source workflow 40155745915 also PASS cross-platform.
+
+Real Linux::Event::HTTP root all-seven-Perl-lane CI 40155946839 PASS
+with exact 4d19f59 implementation and all H1/H2/H3/WebSocket tests.
+Paired socket-free engine (GET -> 32-byte response) before vs after:
+- CI 40155785500: 24.390/23.010 to 22.020/21.606 CPU us/iteration.
+- CI 40155946839: 35.912/33.475 to 31.665/32.547 CPU us/iteration.
+About 7.5–8% lower median CPU within each CI run. Do not average
+absolute timings across separately provisioned runners.
+
+ROOT Stage B STILL FAILS its end-to-end throughput gate. On the same
+CI host in 40155946839, original Linux::Event::HTTP main baseline
+GET/32, 100 sockets, depth 1, 10000 requests and 1000 warmup:
+legacy 49,591/49,085 req/s against rebuilt 24,906/24,602 req/s
+(two repeats per run, order legacy/rebuilt/rebuilt/legacy).
+Rebuilt remains ~50% of legacy despite the engine improvement.
+The measured root server CPU is ~41.3 us/request vs legacy ~22.1.
+Raw measurements and methodology in root:
+bench/results/unblock-stage-b/20261025-bodyless.json.
+
+Next scope: isolate canonical Uniform Response creation versus
+remaining _drive/_transaction_respond state cost, without bypassing
+response validation or adding wrappers/duplicate engine layers.
+Do not make changes to Uniform::HTTP, Linux::Event core or other
+repos without separate authorization. Keep Stage C h2spec 11 failures,
+Stage F cleanup deferred and no release until gates are satisfied.
+
+---
+
 # ACTIVE: Linux::Event integration development
 
 Updated: 2026-10-24 (America/Chicago)
