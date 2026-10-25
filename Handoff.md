@@ -1,3 +1,17 @@
+# RELEASE PREPARATION - Unblock::HTTP1 0.13 (2026-10-25)
+
+Maintainer instructed fast-forward main merge, version bump and release
+preparation for this completed framework-neutral integration feature.
+No tag, GitHub release or PAUSE/CPAN upload authorized.
+Candidate includes Server->drain, canonical native simple-response
+serialization, output ownership and validated bodyless request
+optimization; retain public input ABI v1.
+See docs/RELEASE-0.13.md. Public module versions and t/01-version.t
+are now 0.13, with original 0.12 tagged release remaining unchanged.
+Run CI and audit disttest/version metadata before main merge.
+Dependency downstream Unblock::HTTP 0.03 and Linux::Event::HTTP rebuild
+must require published HTTP1 >=0.13 after coordinated publication.
+
 # ACTIVE Stage B bodyless request optimization — 2026-10-25
 
 Current authorized feature branch: feature/linux-event-integration

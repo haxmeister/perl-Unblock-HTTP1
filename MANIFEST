@@ -1,6 +1,7 @@
 Changes
 docs/COOKBOOK.md
 docs/INTEGRATION.md
+docs/RELEASE-0.13.md
 docs/PROTOCOL_STATUS.md
 examples/anyevent-client.pl
 examples/anyevent-server.pl
