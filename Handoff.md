@@ -1,3 +1,36 @@
+# MAIN 0.13 DOCUMENTATION AND RELEASE METADATA AUDIT - 2026-10-25
+
+The maintainer authorized direct edits on main to complete a thorough,
+simple release documentation review. Source audit commit:
+6db73ae937784e3db4ff52180727f35e96ba3b7b.
+No production engine behavior, public API, NativeABI version, or dependency
+floor changed. The source candidate is 0.13; there was NO tag, GitHub
+release, or CPAN/PAUSE upload.
+
+Completed: Server drain has its own POD section and short README, cookbook,
+and integration guidance; Client POD now lists on_data and on_finish; release
+notes and Changes no longer ship prepublication instructions; protocol status
+mentions draining. Makefile.PL explicitly excludes the private _Engine,
+_Native, and _Wire modules from PAUSE indexing. All 85 tracked files were
+accounted for by MANIFEST and MANIFEST.SKIP, with no missing/stale entries.
+
+All five workflows on audited source commit PASSED:
+- Cross-platform source tests, POD, distcheck/disttest (including Perl 5.16):
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40259176579
+- IO::Async, AnyEvent, Linux::Event framework examples:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40259176575
+- Linux::Event embedding benchmark smoke:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40259176616
+- Embedding diagnostic:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40259176573
+- General serialization benchmark:
+  https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40259176539
+
+Release documentation and source CI are ready for maintainer publication.
+No public release action was taken in this audit.
+
+---
+
 # MAIN RELEASE-PREPARED: perl-Unblock-HTTP1 0.13 - 2026-10-25
 
 The maintainer explicitly authorized moving the completed, tested
