@@ -680,7 +680,7 @@ The Server supports persistent HTTP/1 connections and safely handles
 pipelined request bytes. Only one transaction is active at a time; bytes for a
 later request remain buffered until the prior transaction retires.
 
-=head1 RECEIVE BODY OPTIONS
+=head1 GRACEFUL CONNECTION DRAINING
 
 =head2 drain
 
@@ -701,7 +701,7 @@ already owned by its next protocol and is not affected by C<drain>.
 This engine owns no timer. The host may enforce a grace deadline by reporting
 C<transport_error()> and closing its transport if completion takes too long.
 
-=head2 Body reception
+=head1 RECEIVE BODY OPTIONS
 
 C<receive_body> accepts C<buffered> or C<stream>. Streaming remains the default.
 C<max_buffered_body_bytes> is a positive byte limit, defaulting to 64 MiB.

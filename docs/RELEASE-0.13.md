@@ -1,44 +1,33 @@
-# Unblock::HTTP1 0.13 - release preparation
+# Unblock::HTTP1 0.13
 
-Status: source candidate prepared from
-`feature/linux-event-integration`; do not create a release/tag/CPAN
-upload until the maintainer separately authorizes publication.
+This release improves graceful shutdown, HTTP/1 response serialization,
+memory ownership, and bodyless request processing without changing the
+framework-neutral protocol interface.
 
-## Scope
+## Changes
 
-- Framework-neutral `Server->drain()` stops new HTTP/1 request admission,
-  allows the active request and accepted output to finish, and preserves
-  backpressure/EOF ordering. No event-loop dependency is introduced.
-- Native simple-response serialization retains canonical Uniform messages,
-  with complex cases and subclasses using their existing general path.
-- Output ownership avoids duplicate serialized-byte retention.
-- Bodyless requests avoid redundant receive/freeze work after validated
-  complete, immutable Uniform Requests have already been created.
+- Add `Server->drain()` to finish an admitted request and its response
+  while refusing subsequent pipelined requests. The transport retains
+  responsibility for flushing accepted bytes and enforcing deadlines.
+- Serialize simple canonical `Uniform::HTTP` responses through a native
+  fast path. Complex framing and subclasses retain the existing path.
+- Stop retaining a second serialized output buffer after its bytes have
+  moved into the engine output queue.
+- Skip redundant completion and freezing work on already validated,
+  complete bodyless requests.
+- Add regression coverage for draining, response parity, output ownership,
+  and bodyless request lifecycle.
 
-## Compatibility and dependencies
+## Compatibility
 
-- Distribution / public-module version: 0.13.
-- The native borrowed-input ABI remains at version **1**, with no layout
-  or header contract change.
-- Minimum Perl remains 5.16; Uniform::HTTP >= 0.06.
-- Still independent of Linux::Event, IO::Async, AnyEvent or other loops.
-- The 0.12 release does not contain `Server->drain()`.
-  Consumers requiring graceful drain must depend on >= 0.13 once
-  published (an unreleased feature checkout is not a CPAN requirement).
+- Perl 5.16 or newer; `Uniform::HTTP >= 0.06`.
+- Native borrowed-input ABI remains at version 1.
+- No event-loop, transport, or framework-specific dependency is added.
+- Consumers that call `Server->drain()` require Unblock::HTTP1 0.13 or newer.
 
-## Verification gates
+## Verification
 
-- Standalone source tests for Linux Perl 5.16/latest, macOS/latest,
-  and Windows Perl 5.40 (test.yml).
-- Framework examples tests, including AnyEvent, IO::Async and optional
-  Linux::Event hosting (framework-examples.yml).
-- POD, distcheck and make disttest, and packaged public header discovery.
-- Static version check t/01-version.t; confirmed NativeABI version 1.
-- Release tarball/PAUSE metadata inspection before uploading.
-- Coordinated Linux::Event::HTTP regressions must remain green.
-
-There are no framework-specific performance modes or deviations from
-canonical Uniform::HTTP messages in this update.
-
-This document is a release-preparation record, **not** a claim that
-version 0.13 has been published.
+The 0.13 candidate passed the standalone test matrix on Linux, macOS,
+and Windows, including the Perl 5.16 lane. Framework example smoke tests,
+POD syntax checks, `distcheck`, and `disttest` also passed. The
+coordinated Linux::Event::HTTP regression suite remained green.

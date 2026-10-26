@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP1
 
-0.13  2026-10-25 (release candidate; not yet published)
+0.13  2026-10-25
     - Add Server->drain() for framework-neutral graceful HTTP/1 service
       shutdown: complete an admitted request, reject pipelined successors,
       and preserve queued output/backpressure until transport completion.

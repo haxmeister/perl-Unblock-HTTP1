@@ -238,6 +238,17 @@ in-flight exchange without corrupting framing.
 Calling input_eof(), transport_error(), or close() repeatedly is safe once the
 corresponding terminal condition has been reached.
 
+=head1 GRACEFUL SERVER SHUTDOWN
+
+The framework owns the listener. Stop accepting new connections there, then
+call C<$server-E<gt>drain> on each active Unblock::HTTP1::Server connection.
+The admitted request and its response may finish; subsequent pipelined
+requests are not admitted.
+
+The engine calls C<unblock_finish()> after handing off its remaining output.
+The host still sends those accepted bytes before closing the socket. Any
+grace-period deadline belongs to the host; C<drain()> does not create a timer.
+
 =head1 HTTP CALLBACKS
 
 A server's required on_request callback receives:
