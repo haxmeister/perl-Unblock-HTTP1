@@ -5,6 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(weaken blessed);
 use Uniform::HTTP::Response;
+use Unblock::HTTP1::_Native ();
 
 our $VERSION = '0.13';
 
@@ -142,7 +143,8 @@ sub respond {
         for my $name (qw(stream_body on_drain)) {
             $option{$name} = delete $field{$name} if exists $field{$name};
         }
-        $response = Uniform::HTTP::Response->new(%field);
+        $response = Unblock::HTTP1::_Native::_response_from_fields(\%field)
+            || Uniform::HTTP::Response->new(%field);
     }
 
     return $owner->_transaction_respond($self, $response, %option);

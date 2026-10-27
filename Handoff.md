@@ -1,3 +1,55 @@
+# ACTIVE: native response construction feature - 2026-10-27
+
+Branch: feature/native-response-construction, based on main
+16acac763ad2f158c4c0ac91f2df3df5e6b72284. The maintainer authorized upstream
+feature branches and pushes from the Linux::Event::HTTP reconstruction chat.
+Main, versions, tags and releases remain untouched. HTTP1 0.13, HTTP2 0.13,
+HTTP3 0.14 and Unblock::HTTP 0.03 ARE published on CPAN/GitHub; older release
+preparation notes below are historical. Uniform 0.06 remains unmodified.
+
+Unblock is a collection of agnostic components for integration into async
+systems. This change benefits any consumer of HTTP1 Transaction->respond;
+it contains no framework-specific behavior.
+
+Implemented: named response fields are validated in HTTP1 XS, then passed to
+Uniform's existing uniform_http_fastpath.h uhttp_native_from_validated API.
+Each result is a fresh canonical Uniform::HTTP::Response with independently
+owned body/ordered headers/trailers. No private Uniform layout or cache.
+Invalid fields, UTF-8, magic, unusual containers and >32 header/trailer entries
+retain the existing constructor. HTTP1 framing/lifecycle logic is unchanged.
+Native and portable request-input paths both use this response construction.
+
+Validation so far, Perl 5.38.2 threaded with published CPAN dependencies:
+- Full HTTP1 suite and make disttest PASS: 42 files / 483 top-level tests.
+- New parity tests include every byte in field names/values/reason, invalid
+  fields/errors, leading-zero status, numeric dualvars, UTF-8 fallback,
+  tied-value probes without callbacks, ownership/mutability, real pipelining
+  and cloned interpreter initialization.
+- Root full optional native and Perl suites PASS: 22 files / 183 tests each.
+- Cross-platform CI will run on publication; no remote result claimed yet.
+  response-fastpath.yml compares CPAN/feature/feature/CPAN in one runner for
+  native and Perl input, with zero and one response header.
+
+Matched preliminary measurements on one host, CPAN/feature/feature/CPAN:
+- Independent native-input engine, 100000 measured + 1000 warmup:
+  CPAN 33.498 / 29.764 versus feature 24.353 / 24.218 CPU us/request.
+- Real rebuild sockets, each sample 3 repeats of 20000 + 2000 warmup,
+  100 persistent connections, depth 1, GET, fresh 32-byte response:
+  CPAN 19368 / 18552 versus feature 25626 / 26075 req/s;
+  CPU 50.933 / 53.703 versus 39.950 / 38.582 us/request.
+These establish a useful general improvement, NOT closure of the root Stage B
+performance gate. Historical original-server throughput remains much higher.
+Raw samples are retained in the coordinating root feature branch; the new
+bench/response-construction.pl provides an independent framework-free workload.
+
+Next: publish this checkpoint, inspect cross-platform CI and profile the
+remaining request lifecycle cost.
+Keep root validation on actual CPAN dependencies by default. Any feature overlay
+must remain explicitly labeled as an experiment. Do not reopen H2 conformance
+without regression evidence: it passed strict 147/147 on the published stack.
+
+---
+
 # MAIN 0.13 DOCUMENTATION AND RELEASE METADATA AUDIT - 2026-10-25
 
 The maintainer authorized direct edits on main to complete a thorough,

@@ -1,0 +1,52 @@
+name: response-fastpath
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/native-response-construction
+    paths:
+      - 'HTTP1.xs'
+      - 'lib/**'
+      - 'bench/response-construction.pl'
+      - '.github/workflows/response-fastpath.yml'
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: 'latest'
+      - name: Install published baseline
+        run: |
+          cpanm https://cpan.metacpan.org/authors/id/H/HA/HAX/Uniform-HTTP-0.06.tar.gz
+          cpanm https://cpan.metacpan.org/authors/id/H/HA/HAX/Unblock-HTTP1-0.13.tar.gz
+          perl -MUnblock::HTTP1::Transaction -e 'die "wrong baseline" unless $Unblock::HTTP1::Transaction::VERSION eq "0.13"; die "mixed source" if $INC{"Unblock/HTTP1/Transaction.pm"} =~ m{/blib/}; print "$INC{q{Unblock/HTTP1/Transaction.pm}}\n"'
+      - name: Build feature
+        run: |
+          perl Makefile.PL
+          make test
+      - name: Matched standalone measurements
+        shell: bash
+        run: |
+          mkdir -p results
+          git rev-parse HEAD > results/feature-sha.txt
+          for input in native perl; do
+            for headers in 0 1; do
+              sample=0
+              for variant in cpan feature feature cpan; do
+                sample=$((sample + 1))
+                flags=()
+                if [ "$variant" = feature ]; then flags=(-Mblib); fi
+                perl "${flags[@]}" bench/response-construction.pl \
+                  --input "$input" --headers "$headers" --requests 50000 \
+                  --json "results/$input-$headers-$sample-$variant.json"
+              done
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: response-construction-comparison
+          path: results/

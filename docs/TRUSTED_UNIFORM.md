@@ -3,10 +3,11 @@
 Unblock::HTTP1 uses Uniform::HTTP as its public request and response model.
 
 Uniform::HTTP 0.06 provides the sanctioned native FastPath ABI that Unblock needs for
-performance-sensitive protocol work. Unblock uses it in two places:
+performance-sensitive protocol work. Unblock uses it for:
 
 - constructing canonical Uniform request and response objects from HTTP/1 data
   that the native parser has already validated;
+- constructing fresh canonical responses from validated application fields;
 - reading canonical Uniform objects during serialization without repeatedly
   calling field-access methods or copying ordered header and trailer arrays.
 
@@ -28,6 +29,19 @@ Content-Length, Transfer-Encoding, CONNECT, Upgrade, persistence, and message
 framing.
 
 ## Send path
+
+`Transaction->respond(status => ..., body => ...)` validates ordinary byte
+fields in XS and creates a real `Uniform::HTTP::Response` through
+`uhttp_native_from_validated`, from Uniform's installed C header. Ordered
+headers and trailers are copied; each response owns its data. There is no
+cache or alternative response class.
+
+Invalid fields fall back to Uniform's public constructor for its usual errors.
+UTF-8, magical values and uncommon container shapes also use that constructor.
+The native probe does not invoke tied or overloaded code. More than 32 headers
+or trailers uses the general constructor; this internal optimization threshold
+does not impose an application limit. Explicit response objects retain their
+existing path. HTTP/1 framing checks still happen in the serialization planner.
 
 For exact canonical `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects, Unblock obtains one FastPath view for each

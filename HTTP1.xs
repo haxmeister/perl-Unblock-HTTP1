@@ -1418,6 +1418,130 @@ static const ub_http1_input_ops_v1 ub_http1_input_ops = {
     ub_http1_input_destroy
 };
 
+/* Application fields are untrusted. Recognize only plain byte scalars and
+ * arrays, validate Uniform's syntax, then use its canonical constructor.
+ * Returning NULL asks Perl to handle errors, magic, UTF-8 and unusual shapes.
+ * In particular, probing the fast path must not invoke tied/overloaded code. */
+static int
+ub_response_bytes(pTHX_ SV *value, uhttp_native_bytes *out)
+{
+    STRLEN len;
+    if (!value || SvMAGICAL(value) || !SvOK(value) || SvROK(value)
+        || SvUTF8(value)) return 0;
+    out->data = SvPV(value, len);
+    out->len = len;
+    return 1;
+}
+
+#define UB_RESPONSE_INLINE_FIELDS 32
+
+static int
+ub_response_fields(pTHX_ SV *value, uhttp_native_field *fields, Size_t *count)
+{
+    AV *list, *pair;
+    SSize_t last, i;
+    SV **item, **name, **body;
+    if (SvMAGICAL(value) || !SvROK(value) || SvOBJECT(SvRV(value))
+        || SvTYPE(SvRV(value)) != SVt_PVAV || SvMAGICAL(SvRV(value))) return 0;
+    list = (AV *)SvRV(value);
+    last = av_len(list);
+    if (last >= UB_RESPONSE_INLINE_FIELDS) return 0;
+    for (i = 0; i <= last; ++i) {
+        item = av_fetch(list, i, 0);
+        if (!item || SvMAGICAL(*item) || !SvROK(*item)
+            || SvOBJECT(SvRV(*item)) || SvTYPE(SvRV(*item)) != SVt_PVAV
+            || SvMAGICAL(SvRV(*item))) return 0;
+        pair = (AV *)SvRV(*item);
+        if (av_len(pair) != 1) return 0;
+        name = av_fetch(pair, 0, 0);
+        body = av_fetch(pair, 1, 0);
+        if (!name || !body
+            || !ub_response_bytes(aTHX_ *name, &fields[i].name)
+            || !ub_response_bytes(aTHX_ *body, &fields[i].value)
+            || !valid_field_name(fields[i].name.data, fields[i].name.len)
+            || !valid_field_value(fields[i].value.data, fields[i].value.len)) return 0;
+    }
+    *count = (Size_t)(last + 1);
+    return 1;
+}
+
+static SV *
+ub_response_from_fields(pTHX_ HV *fields)
+{
+    dMY_CXT;
+    uhttp_native_input in;
+    uhttp_native_bytes code;
+    uhttp_native_field headers[UB_RESPONSE_INLINE_FIELDS];
+    uhttp_native_field trailers[UB_RESPONSE_INLINE_FIELDS];
+    SV **value;
+    Size_t i;
+    I32 seen = 1;
+    IV status = 0;
+    int dot = 0;
+    if (SvMAGICAL((SV *)fields) || SvOBJECT((SV *)fields)) return NULL;
+    uhttp_native_input_init(&in, UHTTP_KIND_RESPONSE);
+    value = hv_fetch(fields, "status", 6, 0);
+    if (!value || !ub_response_bytes(aTHX_ *value, &code) || !code.len) return NULL;
+    for (i = 0; i < code.len; ++i) {
+        unsigned char c = (unsigned char)code.data[i];
+        if (c < '0' || c > '9') return NULL;
+        status = status * 10 + (c - '0');
+        if (status > 599) return NULL;
+    }
+    if (status < 100) return NULL;
+    /* A dualvar can have distinct string and numeric values. Let Uniform
+     * retain its usual numeric conversion rather than silently changing it. */
+    if ((SvIOK(*value) || SvNOK(*value)) && SvNV(*value) != (NV)status) return NULL;
+    in.status = status;
+    value = hv_fetch(fields, "body", 4, 0);
+    if (value) {
+        ++seen;
+        if (!ub_response_bytes(aTHX_ *value, &in.body)) return NULL;
+        in.flags |= UHTTP_HAS_BUFFERED_BODY;
+    }
+    value = hv_fetch(fields, "reason", 6, 0);
+    if (value) {
+        ++seen;
+        if (SvMAGICAL(*value)) return NULL;
+        if (SvOK(*value) && (!ub_response_bytes(aTHX_ *value, &in.reason)
+            || !valid_field_value(in.reason.data, in.reason.len))) return NULL;
+    }
+    value = hv_fetch(fields, "version", 7, 0);
+    if (value) {
+        ++seen;
+        if (SvMAGICAL(*value)) return NULL;
+        if (SvOK(*value)) {
+            if (!ub_response_bytes(aTHX_ *value, &in.version) || !in.version.len) return NULL;
+            for (i = 0; i < in.version.len; ++i) {
+                unsigned char c = (unsigned char)in.version.data[i];
+                if (c >= '0' && c <= '9') continue;
+                if (c != '.' || dot || !i || i + 1 == in.version.len) return NULL;
+                dot = 1;
+            }
+        }
+    }
+    value = hv_fetch(fields, "headers", 7, 0);
+    if (value) {
+        ++seen;
+        if (!ub_response_fields(aTHX_ *value, headers, &in.header_count)) return NULL;
+        in.headers = headers;
+    }
+    value = hv_fetch(fields, "trailers", 8, 0);
+    if (value) {
+        ++seen;
+        if (!ub_response_fields(aTHX_ *value, trailers, &in.trailer_count)) return NULL;
+        in.trailers = trailers;
+    }
+    if (hv_iterinit(fields) != seen) return NULL; /* Unknown constructor option. */
+    if (!MY_CXT.initialized) {
+        MY_CXT.compatible = uhttp_native_init(aTHX_ &MY_CXT.uniform_api,
+            UHTTP_NATIVE_ABI_VERSION);
+        MY_CXT.initialized = 1;
+    }
+    if (!MY_CXT.compatible) return NULL;
+    return uhttp_native_from_validated(aTHX_ &MY_CXT.uniform_api, &in, UHTTP_NATIVE_TRUSTED);
+}
+
 MODULE = Unblock::HTTP1    PACKAGE = Unblock::HTTP1::_Native
 PROTOTYPES: DISABLE
 
@@ -1431,6 +1555,15 @@ CLONE(...)
     MY_CXT_CLONE;
     Zero(&MY_CXT, 1, my_cxt_t);
 #endif
+
+SV *
+_response_from_fields(fields)
+    HV *fields
+  CODE:
+    RETVAL = ub_response_from_fields(aTHX_ fields);
+    if (!RETVAL) XSRETURN_UNDEF;
+  OUTPUT:
+    RETVAL
 
 SV *
 _simple_response_wire(request, response, reasons)

@@ -59,3 +59,20 @@ docs/TRUSTED_UNIFORM.md.
 Use cross-engine comparisons and profiles only to identify portable engine
 costs. Framework-specific integration decisions belong to the consuming
 project.
+
+## Fresh response construction
+
+    perl -Mblib bench/response-construction.pl --input native --headers 1
+    perl -Mblib bench/response-construction.pl --input perl --headers 1
+
+This standalone workload sends named response fields for every request and
+records process CPU time. `--mode object` constructs a fresh Uniform response
+explicitly; it is a diagnostic of construction plus response-argument handling,
+not an isolated constructor measurement. Neither mode reuses response objects.
+Use `--json results.json` to retain the data and loaded Transaction path.
+
+For a before/after comparison, run the same script against a published CPAN
+installation and the feature build in baseline/feature/feature/baseline order.
+Use `PERL5LIB` to select each complete library/XS pair and omit `-Mblib` when
+selecting the CPAN installation. Keep Perl, request counts, header count and
+body size identical. Do not run builds or other benchmarks concurrently.

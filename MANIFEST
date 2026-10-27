@@ -69,3 +69,4 @@ t/54-server-drain.t
 t/55-native-response.t
 t/56-output-ownership.t
 t/57-bodyless-completion.t
+t/58-response-construction.t
