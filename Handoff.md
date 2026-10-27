@@ -14,8 +14,9 @@ pipelining and accepted transport output. The initial regression
 expectation incorrectly required on_finish before a coalesced batch
 was accepted; it was corrected at 33bce5330647f4d1c6f3cda9d56eccb6580de7ae.
 The earlier run's two failed assertions were test assumptions, not a
-demonstrated production regression. Re-check the final 33bce533
-cross-platform CI before advancing.
+demonstrated production regression. Final 33bce533 cross-platform CI
+PASS all four jobs (Ubuntu Perl 5.16/latest, macOS and Windows):
+https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40435844102.
 Source build and paired benchmark:
 https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40435786709
 SUCCESS (CPAN Uniform 0.06, same-runner main/candidate comparison).
