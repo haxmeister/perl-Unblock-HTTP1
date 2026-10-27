@@ -1,3 +1,38 @@
+# ACTIVE Stage B generic lifecycle trial - 2026-10-26
+
+Branch feature/shared-server-lifecycle-cost based on main
+16acac763ad2f158c4c0ac91f2df3df5e6b72284.
+Production change f0748e3b14fbf27c51e9615ed02be6c511502c2e:
+avoid on_request_end dispatch/dynamic guard when no callback is installed;
+avoid empty pending_host_finishes checks after transport synchronization.
+Actual present observers retain their previous handling and callback order.
+This is generic for all attached/standalone HTTP1 uses, not LinuxEvent-specific.
+No public API, native ABI, version, main, release, or tag changed.
+
+New t/58-optional-request-end.t checks present/absent observer,
+pipelining and accepted transport output. The initial regression
+expectation incorrectly required on_finish before a coalesced batch
+was accepted; it was corrected at 33bce5330647f4d1c6f3cda9d56eccb6580de7ae.
+The earlier run's two failed assertions were test assumptions, not a
+demonstrated production regression. Re-check the final 33bce533
+cross-platform CI before advancing.
+Source build and paired benchmark:
+https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40435786709
+SUCCESS (CPAN Uniform 0.06, same-runner main/candidate comparison).
+Fresh ordinary response and attached host accept, 20k per sample,
+three process-CPU samples; baseline/candidate/candidate/baseline.
+Native medians baseline 18.5091 / 18.8168 vs feature 18.4086 /
+18.4088 us/request. Portable baseline 22.9760 / 23.2900 vs
+feature 23.2710 / 22.4493; portable difference within run noise.
+Not a significant HTTP1 performance fix, and NOT root socket parity.
+
+Next: finish all cross-platform CI, assess whether tiny improvements
+justify merging; compare a combined candidate with Uniform feature
+in standalone engine and real sockets before any release decision.
+Stage B remains OPEN. Do not alter main or versions.
+
+---
+
 # MAIN 0.13 DOCUMENTATION AND RELEASE METADATA AUDIT - 2026-10-25
 
 The maintainer authorized direct edits on main to complete a thorough,
