@@ -1,3 +1,37 @@
+# ACTIVE Stage B completion-only server callbacks - 2026-10-26
+
+Branch feature/completion-only-callback from released main source
+16acac763ad2f158c4c0ac91f2df3df5e6b72284. No main merge,
+version bump, tag or release. This is independent of the earlier
+feature/shared-server-lifecycle-cost experiment.
+
+Framework-neutral production change 6c199994693c2754ca9db2666c12b76cd091a80a:
+Unblock::HTTP1::Server now accepts on_request_end alone instead of
+requiring a dummy on_request header observer. When on_request exists,
+all existing early callback behavior is unchanged. When absent,
+the engine still constructs and validates a canonical Uniform request,
+handles full body/streams, then invokes on_request_end normally.
+Public POD and graceful drain description updated at b1ef13bf.
+
+New t/58-completion-only.t covers partial POST body, complete frozen
+canonical object, two pipelined GET responses, existing dual callback
+order and rejection of neither callback; MANIFEST updated.
+Validation run:
+https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40439812469
+ALL FOUR cross-platform test lanes PASS (Ubuntu Perl 5.16/latest,
+macOS, Windows). Framework adapter examples:
+https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40439812702
+PASS.
+
+This feature intentionally extends the lower engine's generic callback
+contract. It is useful to any full-body-only application, not tailored
+to Linux::Event. Its high-level consumer is separately developed on
+Unblock::HTTP feature/completion-only-callback. Do not merge/release
+without coordinating the upper dependency floor and a public version bump.
+Real-socket first A/B was inconclusive; Stage B remains OPEN.
+
+---
+
 # MAIN 0.13 DOCUMENTATION AND RELEASE METADATA AUDIT - 2026-10-25
 
 The maintainer authorized direct edits on main to complete a thorough,
