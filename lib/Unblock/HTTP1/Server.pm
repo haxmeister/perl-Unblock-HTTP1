@@ -297,12 +297,16 @@ sub _complete_request {
         $request->mark_complete->freeze;
     }
     $tx->_mark_remote_done;
-    my $cb;
-    {
-        local $self->{completing_request} = 1;
-        $cb = $self->_invoke_server('on_request_end', $tx, $request);
+    # The completion callback is optional. Avoid a method dispatch and
+    # dynamic completion guard when no application observer exists.
+    if ($self->{callbacks}{on_request_end}) {
+        my $cb;
+        {
+            local $self->{completing_request} = 1;
+            $cb = $self->_invoke_server('on_request_end', $tx, $request);
+        }
+        return $self->_application_error($cb) unless $cb eq '1';
     }
-    return $self->_application_error($cb) unless $cb eq '1';
     $self->_retire_if_done;
     return;
 }
@@ -413,7 +417,7 @@ sub _transport_sync {
     my ($self) = @_;
     return if $self->{driving} || $self->{transport_syncing};
     $self->SUPER::_transport_sync;
-    $self->_finish_accepted_output;
+    $self->_finish_accepted_output if $self->{pending_host_finishes};
     return;
 }
 
@@ -421,7 +425,7 @@ sub _transport_finish {
     my ($self, $host) = @_;
     # A host may synchronously close on finish (e.g. peer already at EOF).
     # Commit accepted response completion before that terminal notification.
-    $self->_finish_accepted_output;
+    $self->_finish_accepted_output if $self->{pending_host_finishes};
     $self->SUPER::_transport_finish($host) unless $self->{transport_aborted};
     return;
 }
