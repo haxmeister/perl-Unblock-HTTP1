@@ -692,9 +692,8 @@ later request remain buffered until the prior transaction retires.
     $server->drain;
 
 Stop admitting requests and finish the currently admitted request body and
-response. A request is admitted when its header callback starts. Partial
-headers and pipelined requests that have not reached that callback are not
-admitted. Idle connections finish immediately. Repeated calls are harmless.
+response. A request is admitted once its complete validated head has been
+accepted. Partial headers and later pipelined requests are not admitted. Idle connections finish immediately. Repeated calls are harmless.
 
 Attached transports receive C<unblock_finish()> only after all response bytes
 have been accepted by C<unblock_send()>. A false send result still means
@@ -734,7 +733,8 @@ It does not call successful body completion.
 
 Creates one server protocol engine.
 
-C<on_request> is required.
+Supply at least one of C<on_request> or C<on_request_end>. The first observes
+headers; the second observes the complete request body.
 
 Other callbacks are optional:
 
@@ -785,7 +785,7 @@ Default: 32768.
         my ($tx, $request) = @_;
     }
 
-Required.
+Optional when C<on_request_end> is supplied.
 
 Called once after a complete request head has been parsed and validated.
 
