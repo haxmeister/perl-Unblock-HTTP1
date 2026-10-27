@@ -42,12 +42,14 @@ for my $with_end (0, 1) {
         "GET /two HTTP/1.1\r\nHost: example.test\r\n\r\n";
     is($server->input($wire), length($wire),
         'attached server consumes pipelined input');
+    # Pipelined responses retire in order, but terminal observers run
+    # only after the host has accepted the coalesced output batch.
     my @expected;
     for my $target ('/one', '/two') {
         push @expected, 'request:' . $target;
         push @expected, 'end:' . $target if $with_end;
-        push @expected, 'finish:' . $target;
     }
+    push @expected, 'finish:/one', 'finish:/two';
     is_deeply(\@events, \@expected,
         'optional completion observer and terminal order preserved');
     my $output = join('', @{ $host->{writes} });
