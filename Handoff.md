@@ -1,5 +1,17 @@
 # ACTIVE Stage B completion-only server callbacks - 2026-10-26
 
+Validation follow-through: top-level Unblock::HTTP integration
+https://github.com/haxmeister/perl-Unblock-HTTP/actions/runs/40440089986
+SUCCESS on pinned HTTP1 feature source; H1-only and full
+published H2/H3/WebSocket suites PASS. Real H3 WebSocket tests
+t/35 and t/36 run and PASS with corrected OPENSSL_CONF.
+Independent engine A/B:
+https://github.com/haxmeister/perl-Linux-Event-HTTP/actions/runs/40440056191
+SUCCESS, native 53.60/53.36 baseline vs 50.03/50.39 trial
+CPU us/request; portable 69.75/69.11 vs 66.57/67.56.
+Socket throughput remains only marginally different.
+No promotion to main/release.
+
 Branch feature/completion-only-callback from released main source
 16acac763ad2f158c4c0ac91f2df3df5e6b72284. No main merge,
 version bump, tag or release. This is independent of the earlier
