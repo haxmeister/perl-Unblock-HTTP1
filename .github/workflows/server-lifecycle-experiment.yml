@@ -1,0 +1,50 @@
+name: server-lifecycle-experiment
+
+on:
+  push:
+    branches:
+      - feature/shared-server-lifecycle-cost
+    paths:
+      - 'lib/Unblock/HTTP1/Server.pm'
+      - 'bench/server-lifecycle-cost.pl'
+      - '.github/workflows/server-lifecycle-experiment.yml'
+  workflow_dispatch:
+
+jobs:
+  paired:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: baseline
+
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+
+      - name: Install published dependencies
+        run: |
+          cpanm --notest Uniform::HTTP@0.06
+          cpanm --notest --installdeps ./candidate
+
+      - name: Build independent trees
+        run: |
+          set -euo pipefail
+          for tree in baseline candidate; do
+            ( cd "$tree" && perl Makefile.PL && make )
+          done
+
+      - name: Alternate baseline and candidate on one runner
+        run: |
+          set -euo pipefail
+          for mode in native portable; do
+            for tree in baseline candidate candidate baseline; do
+              echo "MEASUREMENT $mode $tree"
+              ( cd "$tree" && perl -Mblib ../candidate/bench/server-lifecycle-cost.pl "$mode" 20000 )
+            done
+          done
