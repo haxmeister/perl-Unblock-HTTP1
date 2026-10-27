@@ -22,7 +22,8 @@ sub new {
         croak "new(): $name must be a coderef" unless ref($cb) eq 'CODE';
         $callbacks{$name} = $cb;
     }
-    croak 'new(): on_request callback is required' unless $callbacks{on_request};
+    croak 'new(): on_request or on_request_end callback is required'
+        unless $callbacks{on_request} || $callbacks{on_request_end};
     my $self = bless {
         callbacks => \%callbacks,
         active    => undef,
@@ -166,9 +167,13 @@ sub _drive {
                 $self->_queue_output("HTTP/1.1 100 Continue\r\n\r\n");
             }
 
-            my $cb = $self->_invoke_server('on_request', $tx, $request);
-            return $self->_application_error($cb) unless $cb eq '1';
-            return if $self->{switched} || $self->{closed};
+            # A completed-request-only server has no header observer. Do not
+            # invoke an artificial callback for every request in that mode.
+            if ($self->{callbacks}{on_request}) {
+                my $cb = $self->_invoke_server('on_request', $tx, $request);
+                return $self->_application_error($cb) unless $cb eq '1';
+                return if $self->{switched} || $self->{closed};
+            }
 
             if ($bodyless) {
                 $self->_complete_request($tx, $request);
