@@ -1426,12 +1426,19 @@ sub response_receive_plan {
     };
 }
 
+# A native-complete response has already passed the same narrow
+# eligibility check as the native branch in response_plan(). Keep the
+# internal helper private; protocol semantics remain owned by this engine.
+sub _native_complete_response_wire {
+    return Unblock::HTTP1::_Native::_simple_response_wire(
+        $_[0], $_[1], \%REASON,
+    );
+}
+
 sub response_plan {
     my ($request, $response, %option) = @_;
     if (!$option{stream_body}) {
-        my $wire = Unblock::HTTP1::_Native::_simple_response_wire(
-            $request, $response, \%REASON,
-        );
+        my $wire = _native_complete_response_wire($request, $response);
         if (defined $wire) {
             return {
                 wire => $wire, version => '1.1', mode => 'content-length',
