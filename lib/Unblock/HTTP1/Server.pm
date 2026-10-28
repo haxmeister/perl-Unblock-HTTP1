@@ -147,12 +147,10 @@ sub _drive {
                 );
             }
 
-            $tx = Unblock::HTTP1::Transaction->_new(
-                $self, $request,
-                callbacks   => {},
-                local_done  => 0,
-                remote_done => 0,
-            );
+            # A newly accepted server exchange starts with no per-tx
+            # callbacks and neither half completed. _new supplies all three
+            # defaults; avoid a temporary options hash on every request.
+            $tx = Unblock::HTTP1::Transaction->_new($self, $request);
             $tx->{request_keep_alive} = $head->{keep_alive} ? 1 : 0;
             $tx->{request_body_mode} = $head->{body_mode};
             $self->{active} = $tx;
