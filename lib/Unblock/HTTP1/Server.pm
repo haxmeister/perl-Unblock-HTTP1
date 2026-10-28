@@ -13,6 +13,21 @@ use Unblock::HTTP1::Transaction;
 
 our $VERSION = '0.13';
 
+# Shared immutable-by-contract framing description for complete native
+# responses. No serialized bytes or request/response objects live here.
+# All complete native responses have these identical framing properties.
+my $NATIVE_COMPLETE_PLAN = {
+    version        => '1.1',
+    mode           => 'content-length',
+    remaining      => 0,
+    stream_body    => 0,
+    trailers       => [],
+    keep_alive     => 1,
+    close_after    => 0,
+    switch         => 0,
+    body_finalized => 1,
+};
+
 sub new {
     my ($class, %option) = @_;
     my %callbacks;
@@ -334,7 +349,7 @@ sub _transaction_respond {
         );
         if (defined $wire) {
             $tx->_set_response($response);
-            $tx->{send_plan} = 'native-complete';  # private final sentinel
+            $tx->{send_plan} = $NATIVE_COMPLETE_PLAN;
             $tx->{stream_body} = 0;
             $self->_queue_output($wire);
             $tx->_mark_local_done;
