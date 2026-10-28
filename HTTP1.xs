@@ -1493,25 +1493,39 @@ _simple_response_wire(request, response, reasons)
     }
     if (SvUTF8(res.body) || SvUTF8(res.reason)) XSRETURN_UNDEF;
     if (res.flags & UHTTP_HAS_BUFFERED_BODY) body = SvPV(res.body, body_len);
-    wire = sv_2mortal(newSVpvs("HTTP/1.1 "));
-    code[0] = '0' + status / 100;
-    code[1] = '0' + (status / 10) % 10;
-    code[2] = '0' + status % 10;
-    code[3] = '\0';
-    sv_catpvn(wire, code, 3);
-    sv_catpvs(wire, " ");
-    if (SvOK(res.reason)) sv_catsv(wire, res.reason);
-    else if ((reason = hv_fetch(reasons, code, 3, 0)) && SvOK(*reason))
-        sv_catsv(wire, *reason);
-    sv_catpvs(wire, "\r\n");
-    for (i = 0; i < count; ++i) {
-        uhttp_native_field_at(aTHX_ &res.headers, i, &name, &value);
-        sv_catsv(wire, name);
-        sv_catpvs(wire, ": ");
-        sv_catsv(wire, value);
+    if (status == 200 && count == 0 && !SvOK(res.reason)) {
+        /*
+         * Once the native Uniform view, method, version, framing and
+         * trailer checks above succeed, the ordinary headerless 200
+         * response has exactly one valid wire layout. Build its head in
+         * one allocation without intermediate status/reason appends.
+         * Its body is still copied into the queued wire snapshot.
+         */
+        wire = sv_2mortal(newSVpvf(
+            "HTTP/1.1 200 OK\r\nContent-Length: %" UVuf "\r\n\r\n",
+            (UV)body_len
+        ));
+    } else {
+        wire = sv_2mortal(newSVpvs("HTTP/1.1 "));
+        code[0] = '0' + status / 100;
+        code[1] = '0' + (status / 10) % 10;
+        code[2] = '0' + status % 10;
+        code[3] = '\0';
+        sv_catpvn(wire, code, 3);
+        sv_catpvs(wire, " ");
+        if (SvOK(res.reason)) sv_catsv(wire, res.reason);
+        else if ((reason = hv_fetch(reasons, code, 3, 0)) && SvOK(*reason))
+            sv_catsv(wire, *reason);
         sv_catpvs(wire, "\r\n");
+        for (i = 0; i < count; ++i) {
+            uhttp_native_field_at(aTHX_ &res.headers, i, &name, &value);
+            sv_catsv(wire, name);
+            sv_catpvs(wire, ": ");
+            sv_catsv(wire, value);
+            sv_catpvs(wire, "\r\n");
+        }
+        sv_catpvf(wire, "Content-Length: %" UVuf "\r\n\r\n", (UV)body_len);
     }
-    sv_catpvf(wire, "Content-Length: %" UVuf "\r\n\r\n", (UV)body_len);
     sv_catpvn(wire, body, body_len);
     RETVAL = SvREFCNT_inc(wire);
   OUTPUT:
