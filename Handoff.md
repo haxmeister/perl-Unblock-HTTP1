@@ -1,3 +1,94 @@
+# ACTIVE: HTTP/1 internal allocation and native output experiments - 2026-10-27
+
+User approved several **feature-branch-only** experiments after comparing the
+original Linux::Event::HTTP with the new standalone engine. **No public API,
+callbacks, protocol options, engine contract, native ABI version, main merges,
+release/tags/version bumps are authorized.** This experiment is completely
+independent from feature/completion-only-callback (which changed the lower
+public callback contract without user approval, and should NOT be merged).
+
+Branch feature/http1-internal-hotpath, from released main
+16acac763ad2f158c4c0ac91f2df3df5e6b72284, retains the full public
+on_request constructor requirement and public request/response APIs.
+
+SOURCE ROUNDS:
+
+1. Internal native-complete response shortcut at
+   73379246912bf9c3a97ffa16a0aefa5ee38a2d03 (_Wire internal helper)
+   and af6a6b3e8e4e396fd214763b31a0b30c792932f7 (Server).
+   Native eligible canonical response wire goes straight from the same
+   native checks to output rather than allocating a general framing plan.
+   Initial marker-string plan FAILED t/56-output-ownership.t, which
+   correctly expects a per-Transaction hash-shaped private send_plan,
+   even after outgoing wire ownership is transferred. Fixed at
+   a3811a77d8b464fe140092b0c43169239f42e617 with a shared
+   immutable-by-contract, complete/native framing descriptor *hash*.
+   It retains all observable transaction callback, write/error, body
+   and buffer semantics and never retains serialized wire.
+   All 41 files, 355 top-level tests, disttest, platform tests PASS.
+   Direct baseline/trial native CPU mostly overlaps, portable improved
+   22.57/22.79 -> 21.10/20.87 CPU us/request on one runner.
+
+2. Native serializer head formatting f1dab390352c61626886ec8b9caf518235340fbf:
+   After existing canonical Uniform inspection, method/HTTP version,
+   headers/framing/trailers/status safety checks, a normal headerless
+   200 response head is formatted in one native allocation rather
+   than several appends. Other eligible responses retain the previous
+   serializer; complex responses always fall back to full wire planner.
+   **No validation bypass.** 41 tests and full cross-platform PASS.
+
+3. Transaction construction 33a237cde122a3a7c5829faeea1856f3006c3d41:
+   Server::_drive now calls the existing private Transaction->_new($self,
+   $request) directly. Its implementation already defaults callback hash,
+   local_done and remote_done to 0; avoid passing the three redundant
+   named defaults and allocating an options hash each request.
+   **No lazy transaction objects**: the same real tx is constructed
+   before on_request, as guaranteed by the existing public API.
+   41 tests/355 and disttest PASS.
+   CI https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40615199907
+   succeeds, alternate baseline/trial/trial/baseline:
+   native 50.2554/50.1706 vs 47.0344/47.2104 CPU us/req;
+   portable 68.2424/66.4536 vs 63.4886/64.9876.
+   Cross-platform full tests (Ubuntu 5.16/latest, macOS, Windows)
+   https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40615199897
+   ALL 4 PASS; framework examples
+   https://github.com/haxmeister/perl-Unblock-HTTP1/actions/runs/40615199918
+   PASS.
+
+Reproducible baseline comparison workflow:
+.github/workflows/http1-hotpath.yml; controlled engine CPU driver
+bench/hotpath-cost.pl. Both compare the exact main-source SHA above
+against the current candidate in one job; no code changes to published
+main, no stale baseline CPAN/XS mix.
+
+ROOT LINUX::EVENT INTEGRATION (released Unblock::HTTP facade, trial HTTP1
+ONLY; published Uniform remains unchanged):
+https://github.com/haxmeister/perl-Linux-Event-HTTP/actions/runs/40615109107
+round 2 PASS: native/portable full root 22/53 each, independent
+engine native 27.34/26.01 baseline vs 25.22/25.32 trial CPU us,
+socket 22944.9/23996.5 baseline vs 25126.2/24819.1 trial req/s,
+GET32 100 connections, 12k requests + 1k warmup, two repeats each.
+https://github.com/haxmeister/perl-Linux-Event-HTTP/actions/runs/40615275252
+round 3 PASS: independent engine native 26.800/27.113 vs
+25.257/25.660 CPU us; portable 33.872/33.165 vs 31.276/30.679;
+real-socket medians **21783.4/23115.7** published versus
+**24916.5/25388.0** trial req/s; published CPU us/req
+46.654/44.146 versus trial 41.101/40.182. Paired improvement
+~8-16% req/s, ~9-14% socket server CPU. These comparisons are
+**same runner only**, not a claim that overall HTTP1 caught
+original Linux::Event::HTTP's throughput, still much slower.
+ROOT published-stack CI is separate; trial workflow pins candidate SHA
+33a237cde122a3a7c5829faeea1856f3006c3d41.
+
+CAVEATS: The canonical Uniform response constructor and eager Transaction
+still have unavoidable costs under today's approved public API. The
+shared private final-plan descriptor MUST NOT be mutated; do not ship this
+without reviewing that invariant and full protocol/error/pipelining
+coverage. Do not attribute individual round deltas using different-run
+absolute speeds. Stage B remains OPEN. No merges/releases authorized.
+
+---
+
 # MAIN 0.13 DOCUMENTATION AND RELEASE METADATA AUDIT - 2026-10-25
 
 The maintainer authorized direct edits on main to complete a thorough,
