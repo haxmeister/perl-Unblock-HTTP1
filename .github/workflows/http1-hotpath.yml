@@ -1,0 +1,52 @@
+name: Internal HTTP1 hotpath experiments
+
+on:
+  push:
+    branches: [feature/http1-internal-hotpath]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: haxmeister/perl-Unblock-HTTP1
+          ref: 16acac763ad2f158c4c0ac91f2df3df5e6b72284
+          path: .ci-deps/published-source
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+      - name: Build two identical-version native engines from separate sources
+        run: |
+          set -euo pipefail
+          cpanm --notest 'Uniform::HTTP@0.06'
+          ( cd .ci-deps/published-source && perl Makefile.PL && make -j2 )
+          perl Makefile.PL
+          make -j2
+          perl -Iblib/lib -Iblib/arch -MUnblock::HTTP1::_Native -e 'die "missing native driver" unless Unblock::HTTP1::_Native::BorrowedDriver->can("new")'
+      - name: Full candidate regression tests
+        run: |
+          set -euo pipefail
+          make test
+          make disttest
+      - name: Alternating direct native and portable request costs
+        run: |
+          set -euo pipefail
+          base="$PWD/.ci-deps/published-source/blib/lib:$PWD/.ci-deps/published-source/blib/arch"
+          trial="$PWD/blib/lib:$PWD/blib/arch"
+          for mode in native portable; do
+            for variant in base trial trial base; do
+              echo "HOTPATH $mode $variant"
+              if [ "$variant" = base ]; then
+                PERL5LIB="$base" perl bench/hotpath-cost.pl "$mode" 20000
+              else
+                PERL5LIB="$trial" perl bench/hotpath-cost.pl "$mode" 20000
+              fi
+            done
+          done
