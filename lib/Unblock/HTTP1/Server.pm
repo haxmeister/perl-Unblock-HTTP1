@@ -323,6 +323,28 @@ sub _transaction_respond {
     croak 'respond(): on_drain requires stream_body' if $on_drain && !$stream_body;
     croak 'respond(): unknown options: ' . join(', ', sort keys %option) if %option;
 
+    # The complete native response is already fully validated and framed
+    # by the same eligibility check as response_plan(). It cannot stream,
+    # switch protocols, or close a persistent connection. Avoid constructing
+    # a general streaming/framing plan for this common case. Keep ordinary
+    # Transaction, output-acceptance, and terminal-observer semantics.
+    if (!$stream_body) {
+        my $wire = Unblock::HTTP1::_Wire::_native_complete_response_wire(
+            $tx->request, $response,
+        );
+        if (defined $wire) {
+            $tx->_set_response($response);
+            $tx->{send_plan} = 'native-complete';  # private final sentinel
+            $tx->{stream_body} = 0;
+            $self->_queue_output($wire);
+            $tx->_mark_local_done;
+            $tx->{keep_alive} = 1;
+            $self->_retire_if_done;
+            $self->_transport_sync if $self->{transport_attached};
+            return $tx;
+        }
+    }
+
     my $plan = Unblock::HTTP1::_Wire::response_plan(
         $tx->request, $response,
         stream_body => $stream_body,
